@@ -1,0 +1,74 @@
+{% extends "layout.html" %}
+
+{% block title %}File Sanitizer | Vantage{% endblock %}
+
+{% block head_css %}
+<link rel="stylesheet" href="/static/css/sanitizer.css">
+{% endblock %}
+
+{% block content %}
+<div class="admin-page-header">
+    <h1>File Sanitizer</h1>
+    <div class="san-badges">
+        {% if clamav_enabled %}
+        <span class="chip san-backend active">ClamAV</span>
+        {% else %}
+        <span class="chip san-backend">ClamAV</span>
+        {% endif %}
+        {% if vt_enabled %}
+        <span class="chip san-backend active">VirusTotal</span>
+        {% else %}
+        <span class="chip san-backend">VirusTotal</span>
+        {% endif %}
+    </div>
+</div>
+
+{% if !clamav_enabled && !vt_enabled %}
+<div class="san-notice">
+    No scan backends configured. Set <code>clamav_addr</code> or
+    <code>virustotal_api_key</code> in your config to enable scanning.
+    File hashes are still recorded when you upload.
+</div>
+{% endif %}
+
+<div class="san-drop-zone" id="san-drop-zone">
+    <div class="san-drop-inner">
+        <div class="san-drop-icon">&#x1F4C2;</div>
+        <div class="san-drop-text">Drop a file here or <label for="san-file-input" class="san-browse-link">browse</label></div>
+        <div class="san-drop-hint">Max 16 MB &nbsp;·&nbsp; file bytes are not stored</div>
+        <input type="file" id="san-file-input" class="san-file-hidden">
+    </div>
+</div>
+
+<div id="san-progress" class="san-progress" hidden>
+    <div class="san-progress-bar" id="san-progress-bar"></div>
+</div>
+
+<div id="san-result" class="san-result" hidden></div>
+
+<div class="section-header-row" style="margin-top: 2rem;">
+    <h2>Scan History</h2>
+    <button class="button outline small" id="btn-refresh-history">Refresh</button>
+</div>
+
+<div class="container-table-wrap">
+    <table class="container-table">
+        <thead>
+            <tr>
+                <th>Filename</th>
+                <th>Size</th>
+                <th>SHA-256</th>
+                <th>ClamAV</th>
+                <th>VirusTotal</th>
+                <th>Scanned</th>
+                <th class="col-actions"></th>
+            </tr>
+        </thead>
+        <tbody id="san-tbody">
+            <tr><td colspan="7" class="table-empty">Loading…</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<script src="/static/js/sanitizer.js"></script>
+{% endblock %}

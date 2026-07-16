@@ -1,0 +1,102 @@
+{% extends "layout.html" %}
+
+{% block title %}Snapshots | Docker | Vantage{% endblock %}
+
+{% block head_css %}
+<link rel="stylesheet" href="/static/css/docker_snapshots.css">
+{% endblock %}
+
+{% block content %}
+<div class="admin-page-header">
+    <h1>Container Snapshots</h1>
+    {% if docker_available %}
+    <button class="button small" id="btn-new-snap">+ New Snapshot</button>
+    {% endif %}
+</div>
+
+{% if !docker_available %}
+<div class="docker-unavailable">
+    <div class="docker-unavailable-icon">&#x1F433;</div>
+    <div class="docker-unavailable-title">Docker not available</div>
+    <div class="docker-unavailable-sub">The Docker socket is not reachable from this server.</div>
+</div>
+{% else %}
+
+<div class="snap-drawer" id="snap-drawer" hidden>
+    <div class="snap-drawer-header">
+        <span class="snap-drawer-title">Capture Snapshot</span>
+        <button class="button outline small" id="snap-drawer-close">Cancel</button>
+    </div>
+    <div class="snap-form-row">
+        <label for="snap-container">Container</label>
+        <select id="snap-container" class="input">
+            <option value="">— Loading containers… —</option>
+        </select>
+    </div>
+    <div class="snap-form-row">
+        <label for="snap-desc">Description <span class="label-optional">(optional)</span></label>
+        <input type="text" id="snap-desc" class="input" placeholder="e.g. pre-deploy backup">
+    </div>
+    <div id="snap-error" class="snap-error" hidden></div>
+    <div class="snap-drawer-actions">
+        <button class="button" id="btn-snap-create">Capture</button>
+    </div>
+</div>
+
+<div id="snap-success" class="snap-success" hidden>
+    <span id="snap-success-msg"></span>
+    <button class="button outline small" id="snap-success-dismiss">Dismiss</button>
+</div>
+
+<div class="summary" id="snap-stats">
+    <div class="statistic-box">
+        <div class="key">Total</div>
+        <div class="value" id="stat-total">—</div>
+    </div>
+    <div class="statistic-box">
+        <div class="key">Oldest</div>
+        <div class="value" id="stat-oldest">—</div>
+    </div>
+</div>
+
+<div class="section-header-row">
+    <h2>Snapshots</h2>
+</div>
+
+<div class="container-table-wrap">
+    <table class="container-table" id="snap-table">
+        <thead>
+            <tr>
+                <th>Tag</th>
+                <th>Container</th>
+                <th>Image</th>
+                <th>Description</th>
+                <th>Created</th>
+                <th class="col-actions"></th>
+            </tr>
+        </thead>
+        <tbody id="snap-tbody">
+            <tr><td colspan="6" class="table-empty">Loading…</td></tr>
+        </tbody>
+    </table>
+</div>
+
+<div class="modal-overlay" id="restore-modal" hidden>
+    <div class="modal">
+        <div class="modal-header">Restore Snapshot</div>
+        <div class="modal-body">
+            <p class="modal-desc">A new container will be created from this snapshot image. Enter the container name:</p>
+            <input type="text" id="restore-name" class="input" placeholder="e.g. myapp-restored">
+            <div id="restore-error" class="snap-error" hidden></div>
+        </div>
+        <div class="modal-footer">
+            <button class="button outline small" id="restore-cancel">Cancel</button>
+            <button class="button small" id="restore-confirm">Restore</button>
+        </div>
+    </div>
+</div>
+
+{% endif %}
+
+<script src="/static/js/docker_snapshots.js"></script>
+{% endblock %}

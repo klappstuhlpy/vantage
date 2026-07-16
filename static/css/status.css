@@ -1,0 +1,127 @@
+/* This file is licensed under AGPL-3.0 */
+
+.status {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 1rem 0 3rem;
+}
+
+.status-kicker {
+    margin: 0 0 0.75rem;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    letter-spacing: 0.01em;
+    animation: page-rise 0.5s both;
+}
+.status-kicker-prompt { color: var(--prompt); font-weight: 700; }
+
+.status-banner {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+    padding: 1.25rem 1.5rem;
+    border: 1px solid var(--box-border);
+    border-radius: 14px;
+    background:
+        radial-gradient(130% 180% at 0% 0%, color-mix(in srgb, var(--accent, var(--text-muted)) 16%, transparent), transparent 60%),
+        var(--box-shade);
+    margin-bottom: 1.5rem;
+    overflow: hidden;
+    animation: page-rise 0.5s both;
+    animation-delay: 0.05s;
+}
+
+.status-banner h1 {
+    margin: 0;
+    font-size: 1.25rem;
+}
+
+.status-sub {
+    margin: 0.15rem 0 0;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+}
+
+/* Status banner accent by overall state (drives border + the corner glow) */
+.status-banner.up       { border-color: var(--success-border); --accent: var(--success-text); }
+.status-banner.degraded { border-color: var(--warning-border); --accent: var(--warning-text); }
+.status-banner.down     { border-color: var(--error-border);   --accent: var(--error-text); }
+
+/* Coloured dot */
+.status-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: var(--text-muted);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--text-muted) 20%, transparent);
+}
+.status-dot.up       { background: var(--success-text); box-shadow: 0 0 0 4px color-mix(in srgb, var(--success-text) 20%, transparent); }
+.status-dot.degraded { background: var(--warning-text); box-shadow: 0 0 0 4px color-mix(in srgb, var(--warning-text) 20%, transparent); }
+.status-dot.down     { background: var(--error-text);   box-shadow: 0 0 0 4px color-mix(in srgb, var(--error-text) 20%, transparent); }
+.status-banner.up .status-dot       { background: var(--success-text); }
+.status-banner.degraded .status-dot { background: var(--warning-text); }
+.status-banner.down .status-dot     { background: var(--error-text); }
+
+.status-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    border: 1px solid var(--box-border);
+    border-radius: 14px;
+    overflow: hidden;
+    animation: page-rise 0.5s both;
+    animation-delay: 0.1s;
+}
+
+.status-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.85rem 1.1rem;
+    border-bottom: 1px solid var(--box-border);
+    transition: background 140ms ease;
+}
+.status-row:hover { background: var(--box-shade); }
+.status-row:last-child { border-bottom: none; }
+
+.status-name {
+    font-weight: 600;
+    flex: 1 1 auto;
+}
+
+.status-uptime {
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+    font-size: 0.85rem;
+}
+
+.status-badge {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 0.15rem 0.5rem;
+    border-radius: 9999px;
+    border: 1px solid var(--box-border);
+    color: var(--text-muted);
+    background: var(--box-shade);
+}
+.status-badge.up       { border-color: var(--success-border); color: var(--success-text); background: var(--success-bg); }
+.status-badge.degraded { border-color: var(--warning-border); color: var(--warning-text); background: var(--warning-bg); }
+.status-badge.down     { border-color: var(--error-border);   color: var(--error-text);   background: var(--error-bg); }
+
+.status-empty,
+.status-foot {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    text-align: center;
+    margin-top: 1rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .status-kicker,
+    .status-banner,
+    .status-list { animation: none; }
+}

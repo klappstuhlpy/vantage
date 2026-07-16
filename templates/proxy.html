@@ -1,0 +1,21 @@
+{% extends "layout.html" %}
+
+{% block title %}Proxy | Vantage{% endblock %}
+
+{% block content %}
+<div class="admin-page-header">
+    <h1>Reverse Proxy <span class="chip">{{ proxy_kind }}</span></h1>
+    <div style="display:flex; gap: 0.5rem;">
+        <button class="button outline" id="apply-btn" type="button">Apply &amp; reload</button>
+        <button class="button" id="add-btn" type="button">Add route</button>
+    </div>
+</div>
+
+<p class="muted">Subdomain &rarr; upstream route mapping. Changes are written to config and reloaded on apply.</p>
+
+<div id="proxy-app">
+    <noscript>This page requires JavaScript for the route manager.</noscript>
+</div>
+
+<script src="/static/js/proxy.js"></script>
+{% endblock %}

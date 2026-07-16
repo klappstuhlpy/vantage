@@ -1,0 +1,111 @@
+{% extends "layout.html" %}
+
+{% block title %}Metrics | Vantage{% endblock %}
+
+{% block head_css %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.30/dist/uPlot.min.css">
+<link rel="stylesheet" href="/static/css/metrics.css">
+{% endblock %}
+
+{% block content %}
+<div class="admin-page-header">
+    <h1>Metrics</h1>
+    <div class="range-picker" id="range-picker">
+        <button data-range="1h" class="button outline active">1h</button>
+        <button data-range="6h" class="button outline">6h</button>
+        <button data-range="24h" class="button outline">24h</button>
+        <button data-range="7d" class="button outline">7d</button>
+        <button data-range="30d" class="button outline">30d</button>
+    </div>
+</div>
+
+<div class="metric-tiles" id="metric-tiles">
+    <div class="metric-tile" data-key="cpu">
+        <div class="tile-head">
+            <span class="tile-label">CPU</span>
+            <span class="tile-status" id="tile-cpu-status"></span>
+        </div>
+        <div class="tile-value"><span id="tile-cpu-pct">—</span><span class="unit">%</span></div>
+        <div class="tile-sub"><span id="tile-cpu-load">load —</span></div>
+    </div>
+    <div class="metric-tile" data-key="mem">
+        <div class="tile-head">
+            <span class="tile-label">Memory</span>
+            <span class="tile-status" id="tile-mem-status"></span>
+        </div>
+        <div class="tile-value"><span id="tile-mem-pct">—</span><span class="unit">%</span></div>
+        <div class="tile-sub"><span id="tile-mem-detail">— / —</span></div>
+    </div>
+    <div class="metric-tile" data-key="disk">
+        <div class="tile-head">
+            <span class="tile-label">Disk /</span>
+            <span class="tile-status" id="tile-disk-status"></span>
+        </div>
+        <div class="tile-value"><span id="tile-disk-pct">—</span><span class="unit">%</span></div>
+        <div class="tile-sub"><span id="tile-disk-detail">— / —</span></div>
+    </div>
+    <div class="metric-tile" data-key="disk-io">
+        <div class="tile-head">
+            <span class="tile-label">Disk I/O</span>
+        </div>
+        <div class="tile-value tile-value-stacked">
+            <span class="net-line"><span class="arrow">↓</span><span id="tile-disk-read">—</span></span>
+            <span class="net-line"><span class="arrow">↑</span><span id="tile-disk-write">—</span></span>
+        </div>
+        <div class="tile-sub"><span id="tile-disk-iops">— IOPS</span></div>
+    </div>
+    <div class="metric-tile" data-key="net">
+        <div class="tile-head">
+            <span class="tile-label">Network</span>
+        </div>
+        <div class="tile-value tile-value-stacked">
+            <span class="net-line"><span class="arrow">↓</span><span id="tile-net-rx">—</span></span>
+            <span class="net-line"><span class="arrow">↑</span><span id="tile-net-tx">—</span></span>
+        </div>
+        <div class="tile-sub">since last sample</div>
+    </div>
+</div>
+
+<section class="admin-section">
+    <h2>Charts</h2>
+    <div class="metric-charts">
+        <div class="chart-panel">
+            <div class="chart-title">CPU & Load</div>
+            <div id="chart-cpu"></div>
+        </div>
+        <div class="chart-panel">
+            <div class="chart-title">Memory</div>
+            <div id="chart-mem"></div>
+        </div>
+        <div class="chart-panel">
+            <div class="chart-title">Network throughput</div>
+            <div id="chart-net"></div>
+        </div>
+        <div class="chart-panel">
+            <div class="chart-title">Disk I/O</div>
+            <div id="chart-disk-io"></div>
+        </div>
+    </div>
+</section>
+
+<section class="admin-section">
+    <h2>Containers <span class="count-badge muted" id="container-count">0</span></h2>
+    <div class="container-table-wrap">
+        <table class="container-table" id="container-table">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>CPU</th>
+                    <th>Memory</th>
+                    <th>Net I/O</th>
+                </tr>
+            </thead>
+            <tbody><tr><td colspan="4" class="muted">Loading…</td></tr></tbody>
+        </table>
+    </div>
+</section>
+
+<script src="https://cdn.jsdelivr.net/npm/uplot@1.6.30/dist/uPlot.iife.min.js"></script>
+<script src="/static/js/live.js"></script>
+<script src="/static/js/metrics.js"></script>
+{% endblock %}

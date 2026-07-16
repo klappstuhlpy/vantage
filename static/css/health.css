@@ -1,0 +1,156 @@
+/* ── Health monitoring dashboard ───────────────────────────────
+   Reuses .metric-tile / .container-table / .admin-section.
+   ───────────────────────────────────────────────────────────── */
+
+.section-h {
+    font-size: 0.95rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin: 1.25rem 0 0.5rem 0;
+}
+
+/* Status pills use the shared .pill base in admin.css; the JS renders
+   them as `pill dot up|degraded|down|pending`. */
+
+.health-target {
+    font-family: monospace;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    max-width: 24rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* .chip base lives in admin.css; kind chips are square-ish and use the
+   foreground colour. */
+.kind-chip {
+    padding: 0.05rem 0.5rem;
+    border-radius: 0.3rem;
+    color: var(--foreground);
+}
+
+.uptime-bar {
+    width: 5rem;
+    height: 0.6rem;
+    background: var(--box-shade);
+    border-radius: 999px;
+    overflow: hidden;
+    border: 1px solid var(--box-border);
+}
+
+.uptime-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #10b981, #34d399);
+}
+
+.uptime-bar.bad .uptime-bar-fill { background: linear-gradient(90deg, #ef4444, #f87171); }
+.uptime-bar.warn .uptime-bar-fill { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+
+.uptime-cell {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-variant-numeric: tabular-nums;
+}
+
+/* .row-actions .button lives in admin.css. */
+
+/* ── Editor modal ───────────────────────────────────────────── */
+
+.health-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+}
+
+.health-modal[hidden] { display: none; }
+
+.health-modal-card {
+    background: var(--background-elev, var(--background, #0d0d10));
+    border: 1px solid var(--box-border);
+    border-radius: 0.75rem;
+    width: min(36rem, calc(100vw - 2rem));
+    max-height: calc(100vh - 4rem);
+    overflow: auto;
+    padding: 1.25rem;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+}
+
+.health-modal-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.health-modal h2 {
+    margin: 0;
+    font-size: 1.1rem;
+}
+
+.health-modal form label {
+    display: block;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-bottom: 0.6rem;
+}
+
+.health-modal form input[type=text],
+.health-modal form input[type=number],
+.health-modal form select {
+    display: block;
+    width: 100%;
+    margin-top: 0.2rem;
+    padding: 0.45rem 0.6rem;
+    background: var(--box-shade);
+    border: 1px solid var(--box-border);
+    border-radius: 0.4rem;
+    color: var(--foreground);
+    font-size: 0.85rem;
+}
+
+.health-modal .row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 0.5rem;
+}
+
+.health-modal fieldset {
+    border: 1px solid var(--box-border);
+    border-radius: 0.5rem;
+    padding: 0.7rem 0.8rem 0.2rem;
+    margin: 0.6rem 0;
+}
+
+.health-modal fieldset legend {
+    padding: 0 0.4rem;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.health-modal fieldset[hidden],
+.health-modal .kind-only[hidden] { display: none; }
+
+.checkbox-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-top: 1rem;
+}
+
+/* Incidents table — ended/ongoing distinction. */
+#incidents-table .ongoing { color: var(--error-text); font-weight: 600; }

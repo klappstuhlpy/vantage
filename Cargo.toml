@@ -1,0 +1,93 @@
+[package]
+name = "vantage"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-v3"
+description = "Vantage — a security-first VPS/homelab control plane. Manage your server through a terminal-aesthetic web UI, backed by CLI."
+
+# Consumes the shared klappstuhl_me-shared kernel (kls-web-core, kls-ui, kls-agent)
+# as tag-pinned git dependencies, alongside the Percy dashboard and the main site.
+[dependencies]
+kls-ui = { git = "ssh://git@github.com/klappstuhlpy/klappstuhl_me-shared", tag = "v0.1.11" }
+kls-web-core = { git = "ssh://git@github.com/klappstuhlpy/klappstuhl_me-shared", tag = "v0.1.11" }
+kls-agent = { git = "ssh://git@github.com/klappstuhlpy/klappstuhl_me-shared", tag = "v0.1.11" }
+anyhow = "1.0.80"
+argon2 = { version = "0.5.3", features = ["std"] }
+# Compile-time HTML templates for admin pages (own `templates/` dir — Askama
+# templates can't be shared cross-crate, so each app keeps its own; only CSS/JS
+# tokens are shared via kls-ui).
+askama = { version = "0.12.1", features = ["with-axum"] }
+askama_axum = "0.4.0"
+async-trait = "0.1.77"
+axum = { version = "0.7.4", features = ["ws", "multipart"] }
+base64 = "0.22"
+# HTTP basic-auth password hashing for the reverse proxy route guard.
+bcrypt = "0.15"
+# The read-only Docker introspection layer (Seam A): bollard drives the local
+# Docker socket for the container/network/volume list calls, the dependency
+# graph, container inspect, and the live event stream. Mutations do NOT go
+# through bollard — they route through the `kls-agent` host boundary. Same
+# version + rustls (`ssl`) feature the site uses, so the wrapper ports verbatim.
+bollard = { version = "0.17", default-features = false, features = ["ssl"] }
+# TOTP (RFC 6238) second-factor verification + the ChaCha20-Poly1305 at-rest
+# encryption of the shared secret (keyed by the app secret_key) — same
+# construction as the site's `auth/totp.rs`.
+chacha20poly1305 = "0.10"
+cookie = { version = "0.18.0", features = ["percent-encode"] }
+dirs = "5.0.1"
+# WebSocket stream plumbing for the live-update hub (`/ws`): the split
+# sink/stream + `select!` loop feeding a `tokio::broadcast` of `LiveEvent`s.
+futures-util = { version = "0.3.30", default-features = false, features = ["sink"] }
+getrandom = { version = "0.2.12", features = ["std"] }
+hmac = "0.12.1"
+# GeoIP lookups for the security dashboard (reads MaxMind GeoLite2-City.mmdb).
+maxminddb = "0.24"
+# rusqlite is pulled transitively by kls-web-core; declared directly (matching its
+# version + bundled feature) so the migrate() signature and the DB init tests can
+# name rusqlite::Connection. Feature unification keeps it one build.
+# In-process per-IP login lockout (bounded, LRU) — the site's `lockout.rs` pattern.
+quick_cache = "0.4.1"
+rusqlite = { version = "0.31.0", features = ["bundled", "time"] }
+rpassword = "7.3.1"
+# The health monitor's probe client (http/keyword checks) + the SSL-expiry probe.
+# rustls-tls only (no OpenSSL); `rustls`/`tokio-rustls`/`x509-parser` do the raw
+# TLS handshake + cert-chain parse the reqwest client can't expose. Versions
+# match the site so the checker ports verbatim.
+reqwest = { version = "0.12.3", default-features = false, features = ["rustls-tls", "json"] }
+rustls = "0.22"
+rustls-pki-types = "1"
+tokio-rustls = "0.25"
+x509-parser = "0.15"
+serde = { version = "1.0.197", features = ["derive"] }
+# The published rule-table crate for the secret scanner. Rule names are
+# byte-identical to the monolith's old in-tree table, keeping `finding_hash`
+# dedupe hashes stable across the migration.
+secretshape = { version = "0.1", features = ["serde"] }
+sha1 = "0.10"
+# SHA-256 for the secret-scanner finding dedupe hash (rule|path|snippet).
+sha2 = "0.10"
+serde_json = "1.0.114"
+# The SMTP TLS sink in `alerts.rs` builds a rustls client config from the
+# bundled Mozilla root store — same version the site uses.
+webpki-roots = "0.26"
+# "serde-human-readable": the health storage row structs serialise timestamps
+# via `#[serde(with = "time::serde::rfc3339")]`.
+time = { version = "0.3.34", features = ["macros", "serde-human-readable"] }
+# "fs"/"time": the metrics collector reads /proc + /sys via tokio::fs and paces
+# itself with tokio::time (interval/sleep).
+tokio = { version = "1.36.0", features = ["rt-multi-thread", "net", "macros", "signal", "sync", "fs", "time"] }
+# SSH token generation (unique temporary access tokens for CI/automation).
+nanoid = "0.4"
+# Error types for SSH parsing and directory preparation errors.
+thiserror = "2"
+tower-http = { version = "0.5.2", features = ["fs"] }
+tracing = "0.1.40"
+# Rolling JSON file log (the admin app is a production service; the log viewer
+# reads these files). Same appender the site uses.
+tracing-appender = { git = "https://github.com/Rapptz/tracing-appender" }
+tracing-subscriber = { version = "0.3.18", features = ["json"] }
+
+[dev-dependencies]
+# `ServiceExt::oneshot` for driving handlers/middleware in unit tests without a
+# real socket (mirrors the site's handler tests).
+tower = { version = "0.4.13", features = ["util"] }

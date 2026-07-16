@@ -1,0 +1,115 @@
+{% extends "layout.html" %}
+
+{% block title %}Certs | Vantage{% endblock %}
+
+{% block head_css %}
+<link rel="stylesheet" href="/static/css/certs.css" type="text/css">
+{% endblock %}
+
+{% block content %}
+<div class="admin-page-header">
+    <h1>Certs &amp; Domains</h1>
+    <p class="admin-page-sub">
+        Every managed reverse-proxy route alongside its certificate expiry. Cert
+        data comes from the <a href="/monitors">SSL health monitors</a> —
+        add an <code>SSL</code> monitor for a domain to see its expiry here.
+    </p>
+</div>
+
+<section class="admin-section">
+    <h2>Proxy routes <span class="count-badge">{{ routes.len() }}</span></h2>
+    {% if routes.is_empty() %}
+    <p class="admin-empty">
+        No proxy routes configured. Add them on <a href="/proxy">/proxy</a>.
+    </p>
+    {% else %}
+    <div class="container-table-wrap">
+        <table class="container-table">
+            <thead>
+                <tr>
+                    <th>Domain</th>
+                    <th>Upstream</th>
+                    <th>TLS</th>
+                    <th>Certificate</th>
+                    <th>Flags</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in routes %}
+                <tr{% if !r.enabled %} style="opacity:.55"{% endif %}>
+                    <td>
+                        <a href="https://{{ r.subdomain }}" target="_blank" rel="noopener"><code>{{ r.subdomain }}</code></a>
+                        {% if !r.enabled %}<span class="cert-pill unknown">disabled</span>{% endif %}
+                    </td>
+                    <td><code>{{ r.upstream }}</code>{% match r.container %}{% when Some with (c) %} <span class="muted">({{ c }})</span>{% when None %}{% endmatch %}</td>
+                    <td>
+                        {% if r.edge_tls %}<span class="cert-pill ok">Cloudflare edge</span>
+                        {% else if r.ssl_managed %}<span class="cert-pill ok">managed</span>
+                        {% else %}<span class="cert-pill unknown">—</span>{% endif %}
+                    </td>
+                    <td>
+                        {% match r.ssl_days_left %}
+                        {% when Some with (days) %}
+                        <span class="cert-pill {{ r.cert_class() }}">{{ days }} days</span>
+                        {% match r.monitor_name %}{% when Some with (n) %}<span class="muted"> · {{ n }}</span>{% when None %}{% endmatch %}
+                        {% when None %}
+                        {% if r.edge_tls %}<span class="muted">edge-managed</span>{% else %}<span class="muted">no SSL monitor</span>{% endif %}
+                        {% endmatch %}
+                    </td>
+                    <td>
+                        {% if r.cloudflare_proxied %}<span class="cert-pill ok">CF</span>{% endif %}
+                        {% if r.has_auth %}<span class="cert-pill warn">auth</span>{% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+</section>
+
+<section class="admin-section">
+    <h2>Standalone SSL monitors <span class="count-badge">{{ standalone.len() }}</span></h2>
+    {% if standalone.is_empty() %}
+    <p class="admin-empty">
+        No SSL monitors without a matching proxy route. Add SSL monitors on
+        <a href="/monitors">/monitors</a>.
+    </p>
+    {% else %}
+    <div class="container-table-wrap">
+        <table class="container-table">
+            <thead>
+                <tr>
+                    <th>Monitor</th>
+                    <th>Host</th>
+                    <th>Certificate</th>
+                    <th>Status</th>
+                    <th>24h uptime</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in standalone %}
+                <tr>
+                    <td>{{ s.name }}</td>
+                    <td><code>{{ s.host }}</code></td>
+                    <td>
+                        {% match s.ssl_days_left %}
+                        {% when Some with (days) %}<span class="cert-pill {{ s.cert_class() }}">{{ days }} days</span>
+                        {% when None %}<span class="muted">—</span>
+                        {% endmatch %}
+                    </td>
+                    <td>
+                        {% match s.status %}
+                        {% when Some with (st) %}{{ st }}
+                        {% when None %}<span class="muted">no checks yet</span>
+                        {% endmatch %}
+                    </td>
+                    <td>{{ "{:.1}"|format(s.uptime_24h * 100.0) }}%</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+</section>
+{% endblock %}

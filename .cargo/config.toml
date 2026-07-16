@@ -1,0 +1,9 @@
+# Use the mold linker for Linux builds (the Docker image installs it).
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+
+# Fetch git dependencies (the private klappstuhl_me-shared repo) with the git
+# CLI rather than the built-in libgit2. The CLI honours the user's SSH agent and
+# ~/.ssh config, so private-repo fetches over SSH work reliably.
+[net]
+git-fetch-with-cli = true

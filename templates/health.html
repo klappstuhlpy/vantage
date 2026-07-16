@@ -1,0 +1,152 @@
+{% extends "layout.html" %}
+
+{% block title %}Health | Vantage{% endblock %}
+
+{% block head_css %}
+<link rel="stylesheet" href="/static/css/metrics.css">
+<link rel="stylesheet" href="/static/css/health.css">
+{% endblock %}
+
+{% block content %}
+<div class="admin-page-header">
+    <h1>Health &amp; uptime</h1>
+    <div style="display:flex; gap: 0.5rem;">
+        <button class="button outline" id="refresh-btn" type="button">Refresh</button>
+        <button class="button primary" id="new-target-btn" type="button">+ New monitor</button>
+    </div>
+</div>
+
+<div class="metric-tiles">
+    <div class="metric-tile">
+        <div class="tile-head"><span class="tile-label">Monitors</span></div>
+        <div class="tile-value"><span id="tile-total">—</span></div>
+        <div class="tile-sub">configured targets</div>
+    </div>
+    <div class="metric-tile">
+        <div class="tile-head"><span class="tile-label">Up</span><span class="tile-status ok"></span></div>
+        <div class="tile-value"><span id="tile-up">—</span></div>
+        <div class="tile-sub">healthy right now</div>
+    </div>
+    <div class="metric-tile">
+        <div class="tile-head"><span class="tile-label">Degraded</span><span class="tile-status warn"></span></div>
+        <div class="tile-value"><span id="tile-degraded">—</span></div>
+        <div class="tile-sub">slow or near expiry</div>
+    </div>
+    <div class="metric-tile">
+        <div class="tile-head"><span class="tile-label">Down</span><span class="tile-status alert"></span></div>
+        <div class="tile-value"><span id="tile-down">—</span></div>
+        <div class="tile-sub">failing checks</div>
+    </div>
+</div>
+
+<section class="admin-section">
+    <h2 class="section-h">Monitors</h2>
+    <div class="container-table-wrap">
+        <table class="container-table" id="targets-table">
+            <thead>
+                <tr>
+                    <th>Status</th>
+                    <th>Name</th>
+                    <th>Kind</th>
+                    <th>Target</th>
+                    <th>Latency</th>
+                    <th>Uptime (24h)</th>
+                    <th>Last check</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody><tr><td colspan="8" class="muted">Loading…</td></tr></tbody>
+        </table>
+    </div>
+</section>
+
+<section class="admin-section">
+    <h2 class="section-h">Incident timeline</h2>
+    <div class="container-table-wrap">
+        <table class="container-table" id="incidents-table">
+            <thead>
+                <tr>
+                    <th>Status</th>
+                    <th>Monitor</th>
+                    <th>Started</th>
+                    <th>Ended</th>
+                    <th>Duration</th>
+                    <th>Last error</th>
+                </tr>
+            </thead>
+            <tbody><tr><td colspan="6" class="muted">Loading…</td></tr></tbody>
+        </table>
+    </div>
+</section>
+
+<!-- ── Editor modal ────────────────────────────────────────────── -->
+<div id="health-modal" class="health-modal" hidden>
+    <div class="health-modal-card">
+        <div class="health-modal-head">
+            <h2 id="modal-title">New monitor</h2>
+            <button class="button outline" id="modal-close" type="button">✕</button>
+        </div>
+        <form id="health-form" autocomplete="off">
+            <input type="hidden" id="f-id" value="">
+            <label>Name<input type="text" id="f-name" required></label>
+            <label>Kind
+                <select id="f-kind" required>
+                    <option value="http">HTTP — must return 2xx/3xx</option>
+                    <option value="keyword">Keyword — text must (or must not) appear</option>
+                    <option value="tcp">TCP — host:port connect</option>
+                    <option value="ssl">SSL — cert expiry</option>
+                </select>
+            </label>
+            <label>Target
+                <input type="text" id="f-target" required
+                       placeholder="https://example.com/health  ·  example.com:443">
+            </label>
+
+            <div class="row">
+                <label>Interval (s)<input type="number" id="f-interval" value="60" min="10" max="86400"></label>
+                <label>Timeout (ms)<input type="number" id="f-timeout" value="5000" min="500" max="60000"></label>
+                <label>Degraded above (ms)<input type="number" id="f-degraded" value="1000" min="50" max="60000"></label>
+            </div>
+
+            <fieldset class="kind-extra" data-kind="http keyword">
+                <legend>HTTP options</legend>
+                <label>Method
+                    <select id="f-method">
+                        <option value="GET">GET</option>
+                        <option value="HEAD">HEAD</option>
+                        <option value="POST">POST</option>
+                    </select>
+                </label>
+                <label>Expected status codes (comma-separated, optional)
+                    <input type="text" id="f-expected-status" placeholder="200,204">
+                </label>
+                <label class="kind-only" data-kind="keyword">Keyword
+                    <input type="text" id="f-keyword" placeholder="OK">
+                </label>
+                <label class="kind-only" data-kind="keyword">
+                    <input type="checkbox" id="f-invert"> Treat keyword presence as failure
+                </label>
+            </fieldset>
+
+            <fieldset class="kind-extra" data-kind="ssl">
+                <legend>SSL options</legend>
+                <label>Warn when expiring within (days)
+                    <input type="number" id="f-warn-days" value="14" min="1" max="365">
+                </label>
+            </fieldset>
+
+            <label class="checkbox-row">
+                <input type="checkbox" id="f-enabled" checked> Enabled (start probing immediately)
+            </label>
+
+            <div class="modal-actions">
+                <button class="button outline" type="button" id="modal-cancel">Cancel</button>
+                <button class="button primary" type="submit" id="modal-save">Save monitor</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script src="/static/js/live.js"></script>
+<script src="/static/js/health.js"></script>
+{% endblock %}

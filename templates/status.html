@@ -1,0 +1,50 @@
+{#
+    Public, unauthenticated uptime status page (takes `Option<Account>`), built
+    from the health monitors. Standalone — Vantage has no site base template, so
+    this is a self-contained document over the shared design tokens at /kls/base.css
+    plus /static/css/status.css. Deliberately exposes only display name + a coarse
+    status/uptime; the raw target address and check config never leave the admin API.
+#}
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Live operational status.">
+    <title>Status | Vantage</title>
+    <link rel="stylesheet" href="/kls/base.css" type="text/css">
+    <link rel="stylesheet" href="/static/css/status.css" type="text/css">
+</head>
+<body>
+<main style="max-width: 760px; margin: 0 auto; padding: 2rem 1rem;">
+    <section class="status">
+        <p class="status-kicker"><span class="status-kicker-prompt">$</span> systemctl status klappstuhl.target</p>
+        <header class="status-banner {{ overall }}">
+            <span class="status-dot"></span>
+            <div>
+                <h1>{{ overall_label }}</h1>
+                {% if total > 0 %}
+                <p class="status-sub">{{ up }} of {{ total }} services operational</p>
+                {% endif %}
+            </div>
+        </header>
+
+        {% if services.is_empty() %}
+        <p class="status-empty">No public monitors are configured yet.</p>
+        {% else %}
+        <ul class="status-list">
+            {% for s in services %}
+            <li class="status-row" title="Last checked: {{ s.last_check }}">
+                <span class="status-dot {{ s.status }}"></span>
+                <span class="status-name">{{ s.name }}</span>
+                <span class="status-uptime" title="24h uptime">{{ s.uptime }}</span>
+                <span class="status-badge {{ s.status }}">{{ s.status_label }}</span>
+            </li>
+            {% endfor %}
+        </ul>
+        <p class="status-foot">Uptime shown is for the last 24 hours.</p>
+        {% endif %}
+    </section>
+</main>
+</body>
+</html>

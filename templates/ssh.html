@@ -1,0 +1,16 @@
+{% extends "layout.html" %}
+{% block title %}SSH Keys | Vantage{% endblock %}
+{% block content %}
+<div class="admin-page-header">
+    <div>
+        <h1>SSH Key Management</h1>
+        <p>Manage authorized SSH keys, access tokens, and sync to host authorized_keys.</p>
+    </div>
+</div>
+
+<div id="ssh-app">
+    <p>Loading SSH key management...</p>
+</div>
+
+<script src="/static/js/ssh.js"></script>
+{% endblock %}

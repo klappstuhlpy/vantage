@@ -1,0 +1,54 @@
+{% extends "layout.html" %}
+
+{% block title %}Logs | Vantage{% endblock %}
+
+{% block head_css %}
+<style>
+    .log-controls { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 1rem; }
+    .log-controls select, .log-controls input { padding: 0.4rem 0.6rem; background: var(--box-shade); color: inherit; border: 1px solid var(--box-border); border-radius: 8px; }
+    .log-controls input[type=text] { flex: 1 1 220px; }
+    .log-view { background: var(--tui-bg); border: 1px solid var(--box-border); border-radius: 10px; padding: 0.5rem; max-height: 70vh; overflow: auto; font-family: ui-monospace, monospace; font-size: 12.5px; }
+    .log-row { display: flex; gap: 0.6rem; padding: 0.15rem 0.3rem; border-bottom: 1px solid var(--box-border); white-space: pre-wrap; word-break: break-word; }
+    .log-row:hover { background: var(--box-shade); }
+    .log-ts { color: var(--text-muted); flex: 0 0 auto; }
+    .log-lvl { flex: 0 0 52px; font-weight: 700; }
+    .log-lvl.ERROR { color: var(--error-text); }
+    .log-lvl.WARN  { color: var(--warning-text); }
+    .log-lvl.INFO  { color: var(--success-text); }
+    .log-lvl.DEBUG, .log-lvl.TRACE { color: var(--text-muted); }
+    .log-msg { flex: 1 1 auto; }
+    .log-empty { color: var(--text-muted); padding: 1rem; text-align: center; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="admin-page-header">
+    <h1>Logs</h1>
+    <p class="admin-page-sub">Tail and filter the rolling application log.</p>
+</div>
+
+<div class="log-controls">
+    <select id="log-file">
+        <option value="main">Application</option>
+    </select>
+    <select id="log-level">
+        <option value="">All levels</option>
+        <option value="ERROR">Error</option>
+        <option value="WARN">Warn</option>
+        <option value="INFO">Info</option>
+        <option value="DEBUG">Debug</option>
+    </select>
+    <input type="text" id="log-q" placeholder="Filter text…" autocomplete="off">
+    <select id="log-limit">
+        <option value="200">200 lines</option>
+        <option value="500" selected>500 lines</option>
+        <option value="1000">1000 lines</option>
+    </select>
+    <button class="button outline" id="log-refresh">Refresh</button>
+    <label class="muted"><input type="checkbox" id="log-auto"> Auto</label>
+</div>
+
+<div class="log-view" id="log-view"><div class="log-empty">Loading…</div></div>
+
+<script src="/static/js/logs.js" defer></script>
+{% endblock %}

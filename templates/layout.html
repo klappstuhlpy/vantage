@@ -1,0 +1,92 @@
+{#
+    Vantage shell — a self-contained admin layout (no site base template).
+
+    Child templates must:
+      - extend layout.html
+      - override {% block content %}{% endblock %}
+      - expose `account: Option<Account>` and `active_page: &'static str`
+
+    The whole app is the admin surface (it runs on its own admin host), so routes
+    and assets carry no `/admin` prefix — pages sit at bare paths (`/metrics`,
+    `/monitors`, `/database`, `/logs/view`).
+
+    The sidebar nav intentionally lists ONLY the pages that exist in Vantage
+    today; it grows as each feature slice moves in (ADMIN_SEPARATION_PLAN Phase 4,
+    Steps C+). Design tokens come from the shared design system at /kls/base.css;
+    a small app.css adds the shell/nav chrome.
+#}
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex, nofollow">
+    <title>{% block title %}Admin | Vantage{% endblock %}</title>
+    <link rel="stylesheet" href="/kls/base.css" type="text/css">
+    <link rel="stylesheet" href="/static/css/app.css" type="text/css">
+    {% block head_css %}{% endblock %}
+</head>
+<body>
+<div class="admin-shell">
+    <aside class="admin-sidebar" id="admin-sidebar">
+        <div class="admin-sidebar-title"><span class="spark" aria-hidden="true">✻</span> Vantage</div>
+        <nav class="admin-nav">
+            <a href="/" class="admin-nav-item{% if active_page == "home" %} active{% endif %}">
+                <span>Home</span>
+            </a>
+            <a href="/metrics" class="admin-nav-item{% if active_page == "metrics" %} active{% endif %}">
+                <span>Metrics</span>
+            </a>
+            <a href="/docker" class="admin-nav-item{% if active_page == "docker" %} active{% endif %}">
+                <span>Docker</span>
+            </a>
+            <a href="/docker/snapshots" class="admin-nav-item{% if active_page == "snapshots" %} active{% endif %}">
+                <span>Snapshots</span>
+            </a>
+            <a href="/monitors" class="admin-nav-item{% if active_page == "health" %} active{% endif %}">
+                <span>Health</span>
+            </a>
+            <a href="/firewall" class="admin-nav-item{% if active_page == "firewall" %} active{% endif %}">
+                <span>Firewall</span>
+            </a>
+            <a href="/secrets" class="admin-nav-item{% if active_page == "secrets" %} active{% endif %}">
+                <span>Secrets</span>
+            </a>
+            <a href="/sanitizer" class="admin-nav-item{% if active_page == "sanitizer" %} active{% endif %}">
+                <span>Sanitizer</span>
+            </a>
+            <a href="/proxy" class="admin-nav-item{% if active_page == "proxy" %} active{% endif %}">
+                <span>Proxy</span>
+            </a>
+            <a href="/certs" class="admin-nav-item{% if active_page == "certs" %} active{% endif %}">
+                <span>Certs</span>
+            </a>
+            <a href="/ssh" class="admin-nav-item{% if active_page == "ssh" %} active{% endif %}">
+                <span>SSH</span>
+            </a>
+            <a href="/backups" class="admin-nav-item{% if active_page == "backups" %} active{% endif %}">
+                <span>Backups</span>
+            </a>
+            <a href="/security" class="admin-nav-item{% if active_page == "security" %} active{% endif %}">
+                <span>Security</span>
+            </a>
+            <a href="/database" class="admin-nav-item{% if active_page == "database" %} active{% endif %}">
+                <span>Database</span>
+            </a>
+            <a href="/logs/view" class="admin-nav-item{% if active_page == "logs" %} active{% endif %}">
+                <span>Logs</span>
+            </a>
+        </nav>
+        <div class="admin-sidebar-footer">
+            {% if let Some(account) = account %}
+            <span class="admin-whoami">{{ account.name }}</span>
+            {% endif %}
+            <a href="/logout" class="admin-signout">Sign out</a>
+        </div>
+    </aside>
+    <section class="admin-content">
+        {% block content %}{% endblock %}
+    </section>
+</div>
+</body>
+</html>

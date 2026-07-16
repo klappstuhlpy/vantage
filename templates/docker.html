@@ -1,0 +1,208 @@
+{% extends "layout.html" %}
+
+{% block title %}Docker | Vantage{% endblock %}
+
+{% block head_css %}
+<link rel="stylesheet" href="/static/css/docker.css">
+{% endblock %}
+
+{% block content %}
+
+{# ── Services section ─────────────────────────────────────────────────────── #}
+<div class="admin-page-header">
+    <h1>Docker</h1>
+    <div class="services-toolbar">
+        <input id="services-search" type="search" placeholder="Filter services…" autocomplete="off" class="services-search-input">
+        <span class="services-refresh-state" id="services-refresh-state" title="Auto-refreshes every 15 seconds">auto · 15s</span>
+    </div>
+</div>
+
+{% if services.is_empty() %}
+<p class="services-none">No services configured. Add entries to <code>config.json</code> under <code>services</code>.</p>
+{% else %}
+<div class="services-grid" id="services-grid">
+    {% for service in services %}
+    <div class="service-card"
+         data-name="{{ service.name }}"
+         data-image="{% match service.image %}{% when Some with (image) %}{{ image }}{% when None %}{% endmatch %}"
+         data-running="{{ service.running }}">
+        <div class="service-header">
+            <div class="service-name-row">
+                <h2>{{ service.name }}</h2>
+            </div>
+            {% if service.running %}
+            <span class="status-badge running" data-role="status">Running</span>
+            {% else %}
+            <span class="status-badge offline" data-role="status">Offline</span>
+            {% endif %}
+        </div>
+
+        <div class="service-details">
+            <div class="service-detail-row">
+                <span class="detail-label">Status</span>
+                <span class="detail-value" data-role="started">
+                    {% if service.running %}
+                    {% match service.started_at %}
+                    {% when Some with (started) %}Started <time class="js-ts" datetime="{{ started }}">{{ started }}</time>
+                    {% when None %}<span class="muted">Start time unavailable</span>
+                    {% endmatch %}
+                    {% else %}
+                    <span class="muted">Not running</span>
+                    {% endif %}
+                </span>
+            </div>
+            {% match service.image %}
+            {% when Some with (image) %}
+            <div class="service-detail-row">
+                <span class="detail-label">Image</span>
+                <span class="detail-value truncate" data-role="image">{{ image }}</span>
+            </div>
+            {% when None %}{% endmatch %}
+            {% match service.short_id %}
+            {% when Some with (id) %}
+            <div class="service-detail-row">
+                <span class="detail-label">ID</span>
+                <span class="detail-value mono" data-role="id">{{ id }}</span>
+            </div>
+            {% when None %}{% endmatch %}
+            {% match service.restart_count %}
+            {% when Some with (count) %}
+            <div class="service-detail-row">
+                <span class="detail-label">Restarts</span>
+                <span class="detail-value" data-role="restarts">{{ count }}</span>
+            </div>
+            {% when None %}{% endmatch %}
+
+            <div class="service-detail-row stats-row" data-role="cpu-row" hidden>
+                <span class="detail-label">CPU</span>
+                <div class="bar-cell">
+                    <span data-role="cpu-value">—</span>
+                    <div class="bar"><span data-role="cpu-bar"></span></div>
+                </div>
+            </div>
+            <div class="service-detail-row stats-row" data-role="mem-row" hidden>
+                <span class="detail-label">Memory</span>
+                <div class="bar-cell">
+                    <span data-role="mem-value">—</span>
+                    <div class="bar"><span data-role="mem-bar"></span></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="service-footer">
+            <form method="post" action="/docker/action" class="service-actions">
+                <input type="hidden" name="name" value="{{ service.name }}">
+                <button type="submit" name="action" value="start"   class="button start-btn">Start</button>
+                <button type="submit" name="action" value="restart" class="button restart-btn">Restart</button>
+                <button type="submit" name="action" value="stop"    class="button danger stop-btn">Stop</button>
+            </form>
+            <div class="service-secondary-actions">
+                <button class="button logs-btn" type="button">Logs</button>
+                <form method="post" action="/docker/action" class="inline-form">
+                    <input type="hidden" name="name" value="{{ service.name }}">
+                    <button type="submit" name="action" value="pull" class="button pull-btn" title="docker pull (or compose pull)">Pull</button>
+                </form>
+                <form method="post" action="/docker/action" class="inline-form recreate-form">
+                    <input type="hidden" name="name" value="{{ service.name }}">
+                    <button type="submit" name="action" value="recreate" class="button recreate-btn" title="Force-recreate the container">Recreate</button>
+                </form>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+<div class="services-empty" id="services-empty" hidden>No services match the filter.</div>
+{% endif %}
+
+{# ── Docker action log ────────────────────────────────────────────────────── #}
+<div class="docker-action-log" id="docker-action-log">
+    <div class="event-log-header">
+        <span class="event-log-title">Action Log</span>
+        <span class="event-log-status" id="action-log-busy" hidden>working…</span>
+        <button class="button outline small" id="action-log-refresh" type="button" title="Reload the action log">Refresh</button>
+    </div>
+    <div class="action-log-body" id="action-log-body">
+        <div class="event-log-empty" id="action-log-empty">No actions yet. Start, stop, pull or recreate a service to see output here.</div>
+    </div>
+</div>
+
+{# ── Dependency graph section ─────────────────────────────────────────────── #}
+<div class="docker-graph-section">
+    <div class="docker-graph-section-header">
+        <span class="docker-graph-section-title">Dependency Graph</span>
+        {% if docker_available %}
+        <div class="docker-toolbar" id="docker-toolbar">
+            <div class="filter-chips" id="filter-chips">
+                <button class="chip active" data-filter="all">All</button>
+                <button class="chip" data-filter="container">Containers</button>
+                <button class="chip" data-filter="network">Networks</button>
+                <button class="chip" data-filter="volume">Volumes</button>
+            </div>
+            <button class="button outline small" id="btn-relayout" title="Re-run layout">Relayout</button>
+            <button class="button outline small" id="btn-refresh" title="Refresh graph data">Refresh</button>
+            <button class="button outline small" id="btn-fit" title="Fit graph to screen">Fit</button>
+        </div>
+        {% endif %}
+    </div>
+
+    {% if !docker_available %}
+    <div class="docker-unavailable">
+        <div class="docker-unavailable-icon">&#x1F433;</div>
+        <div class="docker-unavailable-title">Docker not available</div>
+        <div class="docker-unavailable-sub">The Docker socket is not reachable from this server.</div>
+    </div>
+    {% else %}
+    <div class="docker-graph-wrap" id="docker-graph-wrap">
+        <div id="cy" class="cytoscape-canvas"></div>
+        <aside class="docker-side-panel" id="side-panel" hidden>
+            <div class="side-panel-header">
+                <div class="side-panel-kind" id="sp-kind"></div>
+                <button class="side-panel-close" id="sp-close" title="Close">&times;</button>
+            </div>
+            <div class="side-panel-name" id="sp-name"></div>
+            <div class="side-panel-body" id="sp-body"></div>
+        </aside>
+    </div>
+    <div class="docker-legend">
+        <span class="legend-item"><span class="legend-dot container"></span>Container</span>
+        <span class="legend-item"><span class="legend-dot network"></span>Network</span>
+        <span class="legend-item"><span class="legend-dot volume"></span>Volume</span>
+    </div>
+    <div class="docker-event-log" id="docker-event-log">
+        <div class="event-log-header">
+            <span class="event-log-title">Live Events</span>
+            <span class="event-log-status" id="event-log-status">Disconnected</span>
+            <button class="button outline small" id="event-log-clear">Clear</button>
+        </div>
+        <div class="event-log-body" id="event-log-body">
+            <div class="event-log-empty" id="event-log-empty">Waiting for events…</div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+{# ── Log console modal ────────────────────────────────────────────────────── #}
+<dialog id="log-modal">
+    <div class="log-modal-header">
+        <div class="log-modal-title-row">
+            <span class="log-modal-name" id="log-modal-name">Logs</span>
+            <span class="log-connection-dot" id="log-connection-dot"></span>
+            <span class="log-connection-label" id="log-connection-label">Connecting…</span>
+        </div>
+        <button class="button close" id="log-close-btn" type="button" aria-label="Close"></button>
+    </div>
+    <div class="log-terminal" id="log-terminal" aria-live="polite" aria-label="Container log output"></div>
+    <div class="log-modal-footer">
+        <label class="toggle-label" id="autoscroll-label">
+            <input type="checkbox" id="autoscroll-toggle" checked>
+            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            <span class="toggle-text">Auto-scroll</span>
+        </label>
+        <button class="button" id="log-clear-btn" type="button">Clear</button>
+    </div>
+</dialog>
+
+<script src="https://cdn.jsdelivr.net/npm/cytoscape@3.29.2/dist/cytoscape.min.js"></script>
+<script src="/static/js/docker.js"></script>
+<script src="/static/js/services.js"></script>
+{% endblock %}

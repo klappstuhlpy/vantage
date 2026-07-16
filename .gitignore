@@ -1,0 +1,7 @@
+/target
+/logs
+*.db
+*.db-wal
+*.db-shm
+config.json
+.env

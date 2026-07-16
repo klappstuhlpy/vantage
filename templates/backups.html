@@ -1,0 +1,160 @@
+{% extends "layout.html" %}
+{% block title %}Backups | Vantage{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>Database Backups</h1>
+    <p class="page-sub">
+        SQLite snapshots via <code>VACUUM INTO</code> — schedule, retention, and
+        off-site mirroring in one place.
+    </p>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-label">Schedule</div>
+        {% if schedule_enabled %}
+        <div class="stat-value success">Every {{ interval_hours }}h</div>
+        {% else %}
+        <div class="stat-value muted">Disabled</div>
+        {% endif %}
+        <div class="stat-sub">
+            {% match next_run %}
+            {% when Some with (n) %}Next ~ {{ n }}
+            {% when None %}
+                {% if schedule_enabled %}Runs after first backup{% else %}Set <code>backup.interval_hours</code>{% endif %}
+            {% endmatch %}
+        </div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-label">Retention</div>
+        <div class="stat-value">{{ keep }}</div>
+        <div class="stat-sub">newest kept · {{ total_size_human }} on disk</div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-label">Snapshots</div>
+        <div class="stat-value">{{ count }}</div>
+        <div class="stat-sub">
+            {% match last_backup %}
+            {% when Some with (l) %}last {{ l }}
+            {% when None %}none yet
+            {% endmatch %}
+        </div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-label">Off-site</div>
+        {% match remote_label %}
+        {% when Some with (label) %}
+            {% if remote_reachable %}
+            <div class="stat-value success">{{ off_site_count }} / {{ count }}</div>
+            <div class="stat-sub"><code>{{ label }}</code></div>
+            {% else %}
+            <div class="stat-value muted">Unreachable</div>
+            <div class="stat-sub">
+                {% match remote_error %}
+                {% when Some with (e) %}{{ e }}
+                {% when None %}<code>{{ label }}</code>
+                {% endmatch %}
+            </div>
+            {% endif %}
+        {% when None %}
+        <div class="stat-value muted">Disabled</div>
+        <div class="stat-sub">set <code>backup.remote</code> in <code>config.json</code></div>
+        {% endmatch %}
+    </div>
+</div>
+
+<section class="section">
+    <form method="post" action="/backups">
+        <button type="submit" class="button primary">Backup now</button>
+    </form>
+</section>
+
+<section class="section">
+    <h2>Snapshots <span class="count-badge">{{ count }}</span></h2>
+    {% if rows.is_empty() %}
+    <p class="empty-state">No backups yet — they appear here once the scheduler runs or you take one manually.</p>
+    {% else %}
+    <div class="table-wrap">
+        <table class="data-table" id="backup-table">
+            <thead>
+                <tr>
+                    <th>File</th>
+                    <th>Size</th>
+                    <th>Created (UTC)</th>
+                    <th>Off-site</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for b in rows %}
+                <tr>
+                    <td><code>{{ b.name }}</code></td>
+                    <td>{{ b.size_human }}</td>
+                    <td>{{ b.modified }}</td>
+                    <td><span class="pill {{ b.off_site_class }}">{{ b.off_site_label }}</span></td>
+                    <td class="actions">
+                        <a class="button outline small" href="/backups/{{ b.name }}/download">Download</a>
+                        {% if remote_label.is_some() %}
+                        <button type="button" class="button outline small" data-upload="{{ b.name }}">Upload off-site</button>
+                        {% endif %}
+                        <button type="button" class="button danger small" data-delete="{{ b.name }}">Delete</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <p class="page-sub">
+        To restore: stop the server, replace <code>admin.db</code> with a
+        downloaded backup, then start it again.
+    </p>
+    {% endif %}
+</section>
+
+<script>
+    const table = document.getElementById('backup-table');
+    if (table) {
+        table.addEventListener('click', async e => {
+            const deleteBtn = e.target.closest('[data-delete]');
+            if (deleteBtn) {
+                const name = deleteBtn.dataset.delete;
+                deleteBtn.disabled = true;
+                try {
+                    const r = await fetch(`/backups/${name}/delete`, { method: 'POST' });
+                    if (r.ok) location.reload();
+                    else deleteBtn.disabled = false;
+                } catch (_) {
+                    deleteBtn.disabled = false;
+                }
+                return;
+            }
+
+            const uploadBtn = e.target.closest('[data-upload]');
+            if (uploadBtn) {
+                const name = uploadBtn.dataset.upload;
+                uploadBtn.disabled = true;
+                uploadBtn.textContent = 'Uploading...';
+                try {
+                    const r = await fetch(`/backups/${name}/upload`, { method: 'POST' });
+                    const data = await r.json();
+                    if (data.status === 'success') {
+                        uploadBtn.textContent = '✓ Uploaded';
+                        setTimeout(() => location.reload(), 1000);
+                    } else {
+                        alert(data.message || 'Upload failed');
+                        uploadBtn.disabled = false;
+                        uploadBtn.textContent = 'Upload off-site';
+                    }
+                } catch (err) {
+                    alert('Upload failed: ' + err.message);
+                    uploadBtn.disabled = false;
+                    uploadBtn.textContent = 'Upload off-site';
+                }
+            }
+        });
+    }
+</script>
+{% endblock %}

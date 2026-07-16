@@ -1,0 +1,16 @@
+{% extends "layout.html" %}
+{% block title %}SSH Audit | Vantage{% endblock %}
+{% block content %}
+<div class="admin-page-header">
+    <div>
+        <h1>SSH Session Audit</h1>
+        <p>Public-key authentication events and token usage.</p>
+    </div>
+</div>
+
+<div id="ssh-audit-app">
+    <p>Loading SSH audit log...</p>
+</div>
+
+<script src="/static/js/ssh.js"></script>
+{% endblock %}
