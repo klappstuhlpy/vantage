@@ -1,0 +1,146 @@
+# Vantage
+
+A security-first VPS/homelab control plane. Manage your server through a terminal-aesthetic web UI, backed by a CLI.
+
+Vantage gives you a single pane of glass over Docker containers, firewall rules, uptime probes, host metrics, SSL certificates, secrets scanning, SSH keys, scheduled scripts, reverse proxy config, and database backups — all behind a hardened auth stack with fail-closed network exposure.
+
+## Features
+
+- **Docker management** — container/network/volume dependency graph, live events, start/stop/restart/pull/recreate, per-service stats and log streaming
+- **Firewall** — nftables/ufw/iptables rule mirror with auto-lockout on brute-force
+- **Uptime monitoring** — HTTP, TCP, keyword, and SSL probes with incident tracking and alerting
+- **Host metrics** — CPU, memory, disk, network from `/proc`+`/sys`; Docker container stats; live WebSocket tiles
+- **SSL certificate monitoring** — expiry tracking across all your domains
+- **Secrets scanning** — periodic filesystem scan for leaked credentials (via [secretshape](https://crates.io/crates/secretshape))
+- **File sanitizer** — ClamAV + VirusTotal integration for uploaded/suspicious files
+- **Reverse proxy** — config generation for nginx, Caddy, and Cloudflare Tunnels; DNS upserts via Cloudflare API
+- **SSH key management** — authorized_keys CRUD, temporary access tokens, audit log
+- **Database console** — browse and query `admin.db` with a two-layer safety guard (prefilter + `query_only` pragma)
+- **Backups** — automatic SQLite `VACUUM INTO` with retention + S3-compatible off-site mirroring
+- **Scheduled scripts** — cron-driven operator scripts runnable from the Ctrl+K spotlight palette
+- **Docker image updates** — periodic registry digest comparison with dashboard notifications
+- **Multi-sink alerting** — Discord webhook, ntfy, generic webhook, SMTP email (all optional, fire in parallel)
+- **Security analytics** — request stats, GeoIP lookups, Cloudflare panels, login attempt tracking
+- **Live updates** — WebSocket hub with subscribe/unsubscribe protocol for real-time dashboard tiles
+
+## Security Model
+
+Vantage is deliberately a remote-root web app and takes an aggressive defensive posture:
+
+| Layer       | Mechanism                                                                                                                                                 |
+|-------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Network     | Fail-closed exposure policy evaluated at startup (`vpn`/`public`/`both`); refuses to bind a public interface in VPN mode; empty CIDR allowlist = deny all |
+| Auth        | Argon2 passwords, HMAC-signed `__Host-` cookies (SameSite=Strict, HttpOnly, 12h), TOTP 2FA (ChaCha20-Poly1305 at rest)                                    |
+| Brute-force | Per-IP login lockout (5 failures / 15 min, bounded LRU); constant-time verification even for unknown usernames                                            |
+| Privilege   | All host mutations route through a typed boundary (`kls-agent`) — not raw shell; reads go through bollard/procfs                                          |
+| Database    | WAL-mode SQLite; DB console enforces `PRAGMA query_only`; safe-mode prefilter rejects writes                                                              |
+
+An authenticated session can manage containers, firewall rules, SSH keys, and cron
+scripts — it is root on the host by design. Run it in the default `vpn` mode behind a
+private network or VPN; only use `public` mode with a tight CIDR allowlist and TOTP on
+every account. To report a vulnerability, see [SECURITY.md](SECURITY.md).
+
+## Requirements
+
+- Rust 1.74+ (2021 edition)
+- SSH access to the `klappstuhl_me-shared` private registry (for kernel crate dependencies)
+- Linux recommended for full functionality (Docker socket, `/proc`/`/sys`, firewall binaries)
+- Optional: `mold` linker (configured automatically on Linux builds)
+- Optional: GeoLite2-City.mmdb for GeoIP lookups
+- Optional: ClamAV daemon for file scanning
+- Optional: VirusTotal API key
+
+## Quick Start
+
+```bash
+# Build
+cargo build --release
+
+# Bootstrap the first admin account (interactive, prompts for username/password)
+cargo run --release -- admin
+
+# Start the server (default: vpn mode, 127.0.0.1:8443)
+cargo run --release
+```
+
+On first run, a `config.json` is generated with a fresh signing key. Edit it to configure exposure mode, services, alert sinks, and integrations.
+
+## Configuration
+
+Vantage loads its configuration from `config.json`. The path is determined by:
+1. `$VANTAGE_CONFIG` environment variable (if set)
+2. Platform config directory (`~/.config/vantage/config.json` on Linux)
+
+### Minimal config (VPN mode)
+
+```json
+{
+  "exposure": {
+    "mode": "vpn",
+    "bind": "127.0.0.1:8443"
+  },
+  "secret_key": "<auto-generated on first run>",
+  "services": []
+}
+```
+
+### Environment Variables
+
+| Variable         | Purpose                                              |
+|------------------|------------------------------------------------------|
+| `VANTAGE_CONFIG` | Override config file path                            |
+| `VANTAGE_PORT`   | Override bind port after config load                 |
+| `RUST_LOG`       | Log level filter (default: `info`)                   |
+| `HOST_PROC`      | Override `/proc` path (for containerized deployment) |
+| `HOST_SYS`       | Override `/sys` path (for containerized deployment)  |
+
+## Development
+
+```bash
+cargo build                     # compile
+cargo run                       # run server (uses config.json)
+cargo run -- admin              # bootstrap admin account
+cargo test                      # run all tests (hermetic, in-memory DB)
+cargo test <test_name>          # single test
+cargo fmt                       # format (max_width=120)
+cargo clippy                    # lint
+```
+
+Tests use `Config::test_default()` and `:memory:` SQLite — no external dependencies needed.
+
+## Architecture
+
+Vantage is structured as independent **feature slices** sharing a common `AppState`:
+
+```
+src/
+  main.rs          -- entry point, AppState, router, auth
+  config.rs        -- config.json loading, exposure policy
+  session.rs       -- auth extractor, account model
+  migrations.rs    -- compile-time embedded schema
+  <feature>/       -- self-contained domain slice
+    mod.rs         -- logic + background workers
+    routes.rs      -- HTTP handlers
+    storage.rs     -- SQLite persistence
+```
+
+Feature slices: metrics, docker, firewall, health, secrets, sanitizer, proxy, backup, ssh, certs, security, logs, dbadmin, spotlight, cron, updates, alerts.
+
+The server-side rendered frontend uses Askama templates (`templates/`) with per-page JS/CSS (`static/`). A shared design system is served from the `kls-ui` crate at `/kls/*`.
+
+Release history is in [CHANGELOG.md](CHANGELOG.md). Vantage is pre-1.0: the config
+format and the exposure policy may still change between minor versions.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Note that building requires SSH access to the
+private `klappstuhl_me-shared` repository, which limits outside contributions in
+practice.
+
+## License
+
+Vantage is licensed under the [GNU Affero General Public License v3.0](LICENSE).
+
+Because the AGPL's network clause (section 13) applies, if you modify Vantage and let
+others use it over a network, you must offer those users the source of your modified
+version.
