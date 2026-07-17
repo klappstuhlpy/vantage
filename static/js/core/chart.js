@@ -164,7 +164,11 @@ export function createChart(host, o) {
     legend: { show: false },
     cursor: {
       y: false,
-      points: { show: true, size: 7, width: 2, fill: (u, i) => p.series[(i - 1) % p.series.length], stroke: () => p.bg1 },
+      // Cursor points are on by default (`show` is the built-in creator function).
+      // Passing `show: true` overwrites that function with a bare `true`, and uPlot
+      // then feeds `undefined` to its addClass helper — the "t.contains" crash. Style
+      // the points, but never touch `show` unless disabling them with `false`.
+      points: { size: 7, width: 2, fill: (u, i) => p.series[(i - 1) % p.series.length], stroke: () => p.bg1 },
       drag: { x: true, y: false, setScale: false },
     },
     scales: { x: { time: true }, y: yRange ? { range: yRange } : {} },

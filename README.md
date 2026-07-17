@@ -369,6 +369,38 @@ A public-mode deployment exercising most fields:
 | `HOST_PROC`      | Override `/proc` path (for containerized deployment) |
 | `HOST_SYS`       | Override `/sys` path (for containerized deployment)  |
 
+## Docker
+
+The recommended deployment method. Requires BuildKit and SSH access to the private `klappstuhl_me-shared` repo.
+
+```bash
+# First run — generates a default config.json
+docker compose up -d
+docker compose down
+
+# Edit the generated config
+vim ./data/config/vantage/config.json
+
+# Bootstrap the admin account (interactive)
+docker compose run --rm vantage ./vantage admin
+
+# Start permanently
+docker compose up -d
+```
+
+The container uses **host networking** so the firewall backend operates on real host rules. Key volume mounts:
+
+| Mount                           | Purpose                    |
+|---------------------------------|----------------------------|
+| `./data:/data`                  | Config, database, logs     |
+| `/var/run/docker.sock`          | Container dashboard        |
+| `/etc/ufw`, `/var/lib/ufw`      | Firewall rule database     |
+| `/proc`, `/sys` (read-only)     | Host metrics               |
+| `/home`, `/root`                | SSH authorized_keys sync   |
+| `/var/log/auth.log` (read-only) | SSH key last-used tracking |
+
+Capabilities granted: `NET_ADMIN` (firewall rule modification) and `NET_BIND_SERVICE` (port <1024 binding).
+
 ## Development
 
 ```bash
