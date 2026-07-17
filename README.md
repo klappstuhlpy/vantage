@@ -84,6 +84,281 @@ Vantage loads its configuration from `config.json`. The path is determined by:
 }
 ```
 
+<details>
+<summary><strong>Full <code>config.json</code> reference (every field, described, with examples)</strong></summary>
+
+Every field is optional unless marked **required**. Omitted fields fall back to the
+default shown. `secret_key` is generated for you on first run — never set it by hand.
+All paths may be absolute or relative to the process working directory.
+
+#### Top-level fields
+
+| Field                         | Type             | Default                                       | Description                                                                                                                                                         |
+|-------------------------------|------------------|-----------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `exposure`                    | object           | `{ "mode": "vpn", "bind": "127.0.0.1:8092" }` | Network exposure policy — which interface(s) the control plane binds and what gates guard them. Evaluated at startup, fail-closed. See [Exposure](#exposure) below. |
+| `services`                    | array            | `[]`                                          | Docker services shown on the Docker dashboard. See [Services](#services).                                                                                           |
+| `firewall_backend`            | string \| null   | `null` (auto-probe)                           | Force a firewall backend: `"nft"`/`"nftables"`, `"ufw"`, `"iptables"`, or `"disabled"`. Unset/empty = probe each in order and use the first that responds.          |
+| `secret_scan_paths`           | array of paths   | `[]`                                          | Directories the secret scanner walks every 6 h for leaked credentials. Empty = scheduler disabled.                                                                  |
+| `spotlight_scripts`           | array            | `[]`                                          | Pre-defined operator scripts (Ctrl+K palette + optional cron). See [Spotlight scripts](#spotlight-scripts).                                                         |
+| `base_url`                    | string           | `"http://127.0.0.1:8092"`                     | Public base URL the admin app is served from (absolute assets/redirects). No trailing slash. In `vpn` mode this is the tunnel address.                              |
+| `domains`                     | array of strings | `[]`                                          | Domains to obtain an ACME certificate for in `public`/`both` mode. Unused in `vpn` mode.                                                                            |
+| `production`                  | bool             | `false`                                       | Production deployment: enables ACME on port 443 and forces `Secure`/`__Host-` cookies.                                                                              |
+| `update_check_interval_hours` | number \| null   | `12`                                          | Hours between background Docker image update checks (registry digest compare). `0` disables. Requires Docker.                                                       |
+| `audit_retention_days`        | number \| null   | `90`                                          | Days of audit-log entries to keep (a hard row cap also applies).                                                                                                    |
+| `alerts`                      | object           | `{}`                                          | Multi-sink alert delivery. All sinks optional; absent = no alerts. See [Alerts](#alerts).                                                                           |
+| `backup`                      | object           | `{}`                                          | SQLite backup settings (retention + off-site mirror). See [Backup](#backup).                                                                                        |
+| `proxy`                       | object           | `{}`                                          | Reverse-proxy config generation. See [Proxy](#proxy).                                                                                                               |
+| `cloudflare`                  | object           | `{}`                                          | Cloudflare API credentials (Tunnel API mode + DNS upserts). See [Cloudflare](#cloudflare).                                                                          |
+| `sshd_auth_log_path`          | string \| null   | `null`                                        | Path to the sshd auth log (e.g. `/var/log/auth.log`). When set, the SSH log watcher updates `last_used_at` for keys on successful auth.                             |
+| `geoip_path`                  | path \| null     | `null`                                        | Path to `GeoLite2-City.mmdb`. Enables country/city fields on the security dashboard.                                                                                |
+| `requests_db_path`            | path \| null     | `null`                                        | Path to the site's `requests.db` (HTTP access log). Opened read-only for security analytics.                                                                        |
+| `site_logs_path`              | path \| null     | `null`                                        | Directory holding the site's rolling logs (`today.log`, `bad_requests.log`). Lets the log viewer switch between Vantage's log and the site's.                       |
+| `clamav_addr`                 | string \| null   | `null`                                        | ClamAV daemon address for the file sanitizer, e.g. `"127.0.0.1:3310"`. Unset = ClamAV scan disabled.                                                                |
+| `virustotal_api_key`          | string \| null   | `null`                                        | VirusTotal API key for the file sanitizer. Unset = VT lookup disabled.                                                                                              |
+| `secret_key`                  | string           | generated                                     | HMAC key for signed cookies. **Written for you on first run — do not edit.**                                                                                        |
+
+#### Exposure
+
+The security-critical block. `mode` selects the posture; the other fields arm the gates.
+
+| Field                 | Type                              | Default            | Description                                                                                                                                                                                   |
+|-----------------------|-----------------------------------|--------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `mode`                | `"vpn"` \| `"public"` \| `"both"` | `"vpn"`            | `vpn`: bind a non-public interface only (refuses a public bind). `public`: hardened public listener with an IP allowlist. `both`: a VPN listener **and** a hardened public one (break-glass). |
+| `bind`                | socket addr                       | `"127.0.0.1:8092"` | Primary listener. In `vpn`/`both` mode must resolve to a non-public interface (loopback / RFC1918 / CGNAT 100.64/10 / IPv6 ULA / link-local).                                                 |
+| `public_bind`         | socket addr \| null               | `null`             | The public listener for `both` mode (**required** when `mode` is `"both"`).                                                                                                                   |
+| `allowlist`           | array of CIDRs                    | `[]`               | CIDR allowlist for the public listener. **Empty = deny-all** (fail closed). Accepts `"1.2.3.4"` (host), `"10.0.0.0/8"`, or IPv6. Ignored by the VPN listener.                                 |
+| `require_client_cert` | bool                              | `false`            | Require a client certificate (mTLS) on the public listener.                                                                                                                                   |
+| `country_allowlist`   | array of strings \| null          | `null`             | Optional ISO country-code allowlist for the public listener (needs `geoip_path`), e.g. `["DE", "AT"]`.                                                                                        |
+
+```json
+"exposure": {
+  "mode": "both",
+  "bind": "100.64.0.1:8092",
+  "public_bind": "0.0.0.0:443",
+  "allowlist": ["203.0.113.0/24", "198.51.100.7"],
+  "require_client_cert": true,
+  "country_allowlist": ["DE"]
+}
+```
+
+#### Services
+
+Each entry is one Docker service on the Docker dashboard.
+
+| Field        | Type           | Required  | Description                                                                                                                                                                          |
+|--------------|----------------|-----------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `name`       | string         | yes       | Display name / the key the dashboard addresses actions and logs by.                                                                                                                  |
+| `identifier` | string         | yes       | The Docker container name passed to `docker start`/`stop`/etc.                                                                                                                       |
+| `path`       | string \| null | no        | Directory holding the `docker-compose.yml`. When set and reachable, actions drive `docker compose` here; otherwise they fall back to bare-container commands over the Docker socket. |
+
+```json
+"services": [
+  { "name": "Web", "identifier": "web", "path": "/opt/stacks/web" },
+  { "name": "Redis", "identifier": "redis" }
+]
+```
+
+#### Spotlight scripts
+
+Operator scripts runnable from the Ctrl+K palette and, when `schedule` is set, on cron.
+
+| Field         | Type           | Required  | Description                                                                                                |
+|---------------|----------------|-----------|------------------------------------------------------------------------------------------------------------|
+| `id`          | string         | yes       | Stable identifier (used by the run endpoint and the per-id run lock).                                      |
+| `name`        | string         | yes       | Display name in the palette.                                                                               |
+| `command`     | string         | yes       | The shell command to run (bounded by a timeout, output tail-truncated).                                    |
+| `description` | string \| null | no        | Short description shown in the palette.                                                                    |
+| `cwd`         | string \| null | no        | Working directory to run the command in.                                                                   |
+| `schedule`    | string \| null | no        | 5-field cron expression (`min hour dom month dow`, UTC). When set, runs automatically at matching minutes. |
+
+```json
+"spotlight_scripts": [
+  {
+    "id": "nightly-prune",
+    "name": "Prune Docker",
+    "command": "docker system prune -af",
+    "description": "Reclaim disk from unused images",
+    "cwd": "/root",
+    "schedule": "0 4 * * *"
+  }
+]
+```
+
+#### Alerts
+
+All four sinks are optional and fire in parallel; a missing key disables that sink. Sink
+**addresses live only here** (the URL is the credential) — there is no route to edit them.
+
+| Field                 | Type           | Description                                                      |
+|-----------------------|----------------|------------------------------------------------------------------|
+| `discord_webhook_url` | string \| null | Discord webhook (receives the raw Discord-shaped JSON).          |
+| `ntfy_url`            | string \| null | ntfy topic URL (plain-text push with priority/tags).             |
+| `webhook_url`         | string \| null | Generic webhook (receives the neutral `AlertNotification` JSON). |
+| `email`               | object \| null | SMTP email sink (see below).                                     |
+
+**`alerts.email`** — SMTP delivery. Port `465` uses implicit TLS; anything else upgrades via STARTTLS.
+
+| Field      | Type             | Required  | Default  | Description                                                              |
+|------------|------------------|-----------|----------|--------------------------------------------------------------------------|
+| `host`     | string           | yes       | —        | SMTP hostname, e.g. `smtp.fastmail.com`.                                 |
+| `port`     | number           | no        | `587`    | SMTP port. `465` = implicit TLS, else STARTTLS.                          |
+| `username` | string \| null   | no        | —        | AUTH LOGIN username (omit with `password` for an unauthenticated relay). |
+| `password` | string \| null   | no        | —        | AUTH LOGIN password / app-password.                                      |
+| `from`     | string           | yes       | —        | Envelope sender / `From:` address.                                       |
+| `to`       | array of strings | yes       | —        | One or more recipient addresses.                                         |
+
+```json
+"alerts": {
+  "discord_webhook_url": "https://discord.com/api/webhooks/123/abc",
+  "ntfy_url": "https://ntfy.sh/my-private-topic",
+  "webhook_url": "https://example.com/hooks/vantage",
+  "email": {
+    "host": "smtp.fastmail.com",
+    "port": 465,
+    "username": "alerts@example.com",
+    "password": "app-password",
+    "from": "alerts@example.com",
+    "to": ["ops@example.com"]
+  }
+}
+```
+
+#### Backup
+
+SQLite backup (on-disk retention + optional off-site mirror).
+
+| Field            | Type           | Default  | Description                                                  |
+|------------------|----------------|----------|--------------------------------------------------------------|
+| `interval_hours` | number \| null | `24`     | Hours between automatic `VACUUM INTO` backups. `0` disables. |
+| `keep`           | number \| null | `14`     | Number of automatic backups to retain.                       |
+| `remote`         | object \| null | `null`   | Off-site target. Unset = local-only.                         |
+
+**`backup.remote`** — S3-compatible target (`kind` is currently `"s3"` only).
+
+| Field               | Type           | Required  | Description                                                                             |
+|---------------------|----------------|-----------|-----------------------------------------------------------------------------------------|
+| `kind`              | string         | yes       | Backend kind. Currently only `"s3"`.                                                    |
+| `endpoint`          | string         | yes       | Endpoint base URL (AWS `https://s3.us-east-1.amazonaws.com`, B2, R2, MinIO, …).         |
+| `region`            | string         | yes       | Signing region. AWS needs the real region; B2/R2/MinIO accept any value.                |
+| `bucket`            | string         | yes       | Destination bucket.                                                                     |
+| `prefix`            | string \| null | no        | Key prefix inside the bucket (e.g. `"vantage/"`; a trailing slash is added if missing). |
+| `access_key_id`     | string         | yes       | Access key id.                                                                          |
+| `secret_access_key` | string         | yes       | Secret access key.                                                                      |
+
+```json
+"backup": {
+  "interval_hours": 12,
+  "keep": 30,
+  "remote": {
+    "kind": "s3",
+    "endpoint": "https://s3.us-west-002.backblazeb2.com",
+    "region": "us-west-002",
+    "bucket": "my-backups",
+    "prefix": "vantage/",
+    "access_key_id": "0026...",
+    "secret_access_key": "K002..."
+  }
+}
+```
+
+#### Proxy
+
+Reverse-proxy config generation.
+
+| Field            | Type           | Default   | Description                                                                                                                             |
+|------------------|----------------|-----------|-----------------------------------------------------------------------------------------------------------------------------------------|
+| `kind`           | string \| null | `"nginx"` | Backend: `"nginx"`, `"caddy"`, or `"cloudflared"`.                                                                                      |
+| `config_dir`     | path \| null   | `null`    | Directory to write generated config into. Unset = routes tracked in the DB only (no files, no reload). Ignored in cloudflared API mode. |
+| `reload_command` | string \| null | `null`    | Shell command to reload the proxy after regeneration, e.g. `"nginx -s reload"`.                                                         |
+
+```json
+"proxy": {
+  "kind": "nginx",
+  "config_dir": "/etc/nginx/conf.d",
+  "reload_command": "nginx -s reload"
+}
+```
+
+#### Cloudflare
+
+Cloudflare API credentials (Tunnel API mode + DNS record upserts). All fields optional; supply what your setup uses.
+
+| Field                     | Type           | Description                             |
+|---------------------------|----------------|-----------------------------------------|
+| `api_token`               | string \| null | Cloudflare API token.                   |
+| `account_id`              | string \| null | Account id.                             |
+| `tunnel_id`               | string \| null | Tunnel id (for API-managed tunnels).    |
+| `zone_id`                 | string \| null | DNS zone id (for record upserts).       |
+| `tunnel_name`             | string \| null | Tunnel name.                            |
+| `tunnel_credentials_file` | string \| null | Path to a tunnel credentials JSON file. |
+
+```json
+"cloudflare": {
+  "api_token": "cf-token",
+  "account_id": "abc123",
+  "tunnel_id": "def456",
+  "zone_id": "ghi789",
+  "tunnel_name": "vantage",
+  "tunnel_credentials_file": "/etc/cloudflared/creds.json"
+}
+```
+
+#### Complete example
+
+A public-mode deployment exercising most fields:
+
+```json
+{
+  "exposure": {
+    "mode": "public",
+    "bind": "0.0.0.0:443",
+    "allowlist": ["203.0.113.0/24"],
+    "require_client_cert": false,
+    "country_allowlist": ["DE", "AT"]
+  },
+  "services": [
+    { "name": "Web", "identifier": "web", "path": "/opt/stacks/web" }
+  ],
+  "firewall_backend": "nft",
+  "secret_scan_paths": ["/opt", "/srv"],
+  "spotlight_scripts": [
+    { "id": "prune", "name": "Prune Docker", "command": "docker system prune -af", "schedule": "0 4 * * *" }
+  ],
+  "base_url": "https://vantage.example.com",
+  "domains": ["vantage.example.com"],
+  "production": true,
+  "update_check_interval_hours": 12,
+  "audit_retention_days": 90,
+  "alerts": {
+    "discord_webhook_url": "https://discord.com/api/webhooks/123/abc",
+    "email": {
+      "host": "smtp.fastmail.com", "port": 465,
+      "username": "alerts@example.com", "password": "app-password",
+      "from": "alerts@example.com", "to": ["ops@example.com"]
+    }
+  },
+  "backup": {
+    "interval_hours": 12, "keep": 30,
+    "remote": {
+      "kind": "s3", "endpoint": "https://s3.us-east-1.amazonaws.com",
+      "region": "us-east-1", "bucket": "my-backups", "prefix": "vantage/",
+      "access_key_id": "AKIA...", "secret_access_key": "..."
+    }
+  },
+  "proxy": { "kind": "nginx", "config_dir": "/etc/nginx/conf.d", "reload_command": "nginx -s reload" },
+  "cloudflare": { "api_token": "cf-token", "zone_id": "ghi789" },
+  "sshd_auth_log_path": "/var/log/auth.log",
+  "geoip_path": "/var/lib/geoip/GeoLite2-City.mmdb",
+  "requests_db_path": "/var/lib/site/requests.db",
+  "site_logs_path": "/var/log/site",
+  "clamav_addr": "127.0.0.1:3310",
+  "virustotal_api_key": "vt-key",
+  "secret_key": "<auto-generated on first run>"
+}
+```
+
+</details>
+
 ### Environment Variables
 
 | Variable         | Purpose                                              |

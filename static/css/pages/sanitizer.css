@@ -1,0 +1,237 @@
+/* Sanitizer page — composition only. */
+
+@layer pages {
+  /* =====================================================================
+     Drop zone
+     ===================================================================== */
+  .drop {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--sp-2);
+    padding: var(--sp-7) var(--sp-5);
+    background: var(--bg-1);
+    border: 1.5px dashed var(--line-ctl);
+    border-radius: var(--r-l);
+    cursor: pointer;
+    text-align: center;
+    transition:
+      border-color var(--dur-fast) var(--ease-out),
+      background var(--dur-fast) var(--ease-out);
+  }
+
+  .drop:hover {
+    border-color: var(--acc);
+    background: var(--bg-2);
+  }
+
+  /* The input is the focusable control, so the ring belongs on the zone it
+     visually *is* — :focus-within puts it there without a tabindex on a label. */
+  .drop:focus-within {
+    outline: 2px solid var(--acc);
+    outline-offset: 2px;
+    border-color: var(--acc);
+  }
+
+  .drop.is-over {
+    border-color: var(--acc);
+    background: var(--acc-soft);
+  }
+
+  .drop.is-busy {
+    pointer-events: none;
+    opacity: 0.6;
+  }
+
+  /* Visually hidden, but still a real focusable input in the tab order — the
+     accessible name and the keyboard path both come from it. */
+  .drop-input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .drop-icon {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    margin-bottom: var(--sp-1);
+    background: var(--bg-2);
+    border-radius: var(--r-full);
+    color: var(--ink-2);
+  }
+
+  .drop:hover .drop-icon,
+  .drop.is-over .drop-icon {
+    background: var(--acc-soft);
+    color: var(--acc);
+  }
+
+  .drop-title {
+    font-size: var(--fs-md);
+    color: var(--ink-1);
+  }
+
+  .drop-link {
+    color: var(--acc);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .drop-hint {
+    font-size: var(--fs-xs);
+    color: var(--ink-3);
+  }
+
+  #progress {
+    margin-top: var(--sp-3);
+  }
+
+  /* =====================================================================
+     Verdict card
+     ===================================================================== */
+  .verdict {
+    margin-top: var(--sp-4);
+    animation: verdict-in var(--dur-mid) var(--ease-out);
+  }
+
+  @keyframes verdict-in {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+  }
+
+  .verdict.down {
+    border-color: color-mix(in srgb, var(--down) 45%, var(--line-2));
+  }
+  .verdict.warn {
+    border-color: color-mix(in srgb, var(--warn) 45%, var(--line-2));
+  }
+  .verdict.ok {
+    border-color: color-mix(in srgb, var(--ok) 40%, var(--line-2));
+  }
+
+  .verdict-body {
+    display: flex;
+    gap: var(--sp-4);
+    align-items: flex-start;
+  }
+
+  .verdict-icon {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    border-radius: var(--r-full);
+  }
+
+  .verdict.down .verdict-icon {
+    background: color-mix(in srgb, var(--down) 14%, transparent);
+    color: var(--down);
+  }
+  .verdict.warn .verdict-icon {
+    background: color-mix(in srgb, var(--warn) 14%, transparent);
+    color: var(--warn);
+  }
+  .verdict.ok .verdict-icon {
+    background: color-mix(in srgb, var(--ok) 14%, transparent);
+    color: var(--ok);
+  }
+
+  .verdict-text {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-1);
+    min-width: 0;
+    flex: 1;
+  }
+
+  .verdict-title {
+    font-size: var(--fs-lg);
+    font-weight: 600;
+    color: var(--ink-1);
+  }
+
+  .verdict-detail {
+    font-size: var(--fs-sm);
+    color: var(--ink-2);
+  }
+
+  .verdict-kv {
+    margin-top: var(--sp-3);
+  }
+
+  .verdict-link {
+    align-self: flex-start;
+    margin-top: var(--sp-3);
+  }
+
+  .hash-row {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    min-width: 0;
+  }
+
+  .hash {
+    overflow-wrap: anywhere;
+    font-size: var(--fs-xs);
+  }
+
+  /* =====================================================================
+     History
+     ===================================================================== */
+  .file-cell {
+    max-width: 18rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* A hash is a button because copying it is the only thing anyone does with
+     it, but it must not look like a form button sitting in a table cell. */
+  .hash-btn {
+    padding: 0;
+    background: none;
+    border: 0;
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    color: var(--ink-2);
+    cursor: pointer;
+    border-bottom: 1px dotted var(--line-ctl);
+  }
+
+  .hash-btn:hover {
+    color: var(--ink-1);
+    border-bottom-color: var(--acc);
+  }
+
+  .vt-link {
+    text-decoration: none;
+  }
+
+  .dim {
+    color: var(--ink-3);
+    font-size: var(--fs-sm);
+  }
+
+  @media (max-width: 720px) {
+    .drop {
+      padding: var(--sp-5) var(--sp-4);
+    }
+
+    .file-cell {
+      max-width: 9rem;
+    }
+  }
+}

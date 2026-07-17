@@ -1,0 +1,23 @@
+/* Firewall page — composition only. */
+
+@layer pages {
+  /* The block form is a single row on desktop and stacks on narrow screens;
+     the submit button aligns to the inputs, not the labels above them. */
+  .lockout-form {
+    display: grid;
+    grid-template-columns: 1.2fr 1.6fr 1fr auto;
+    gap: var(--sp-3);
+    align-items: end;
+  }
+
+  @media (max-width: 780px) {
+    .lockout-form {
+      grid-template-columns: 1fr;
+      align-items: stretch;
+    }
+  }
+
+  .action-only[hidden] {
+    display: none;
+  }
+}

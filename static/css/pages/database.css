@@ -1,0 +1,151 @@
+/* Database console — composition only. */
+
+@layer pages {
+  .db-grid {
+    display: grid;
+    grid-template-columns: minmax(200px, 260px) minmax(0, 1fr);
+    gap: var(--sp-5);
+    align-items: start;
+  }
+
+  /* The catalog is a reference, not the subject: it sticks so you can pick a
+     table while scrolled deep into a result set. */
+  .db-side {
+    position: sticky;
+    top: var(--sp-4);
+  }
+
+  .db-side .table-wrap {
+    max-height: 60vh;
+    overflow: auto;
+  }
+
+  /* A table name is a link in behaviour but a button in semantics — it runs a
+     query, it doesn't navigate. Styled as the former, announced as the latter. */
+  .table-link {
+    padding: 0;
+    background: none;
+    border: 0;
+    font-family: var(--font-mono);
+    font-size: var(--fs-sm);
+    color: var(--ink-1);
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .table-link:hover {
+    color: var(--acc);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .db-side .dim {
+    color: var(--ink-3);
+  }
+
+  /* =====================================================================
+     Query editor
+     ===================================================================== */
+  .db-sql {
+    border: 0;
+    border-radius: 0;
+    background: var(--bg-0);
+    min-height: 9rem;
+    resize: vertical;
+  }
+
+  .db-sql:focus {
+    outline: 2px solid var(--acc);
+    outline-offset: -2px;
+  }
+
+  .db-run-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+  }
+
+  .db-meta {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: var(--fs-xs);
+    color: var(--ink-3);
+  }
+
+  /* =====================================================================
+     Danger mode
+     ===================================================================== */
+  #danger-banner {
+    margin: var(--sp-4) 0;
+  }
+
+  /* Safe mode off is a state the operator must not be able to forget they are
+     in. The switch itself turns red, so the tell is on the control, not only in
+     a banner they have scrolled past. */
+  #safe-wrap:has(#safe-mode:not(:checked)) .switch-track {
+    background: var(--down);
+    border-color: var(--down);
+  }
+
+  #safe-wrap:has(#safe-mode:not(:checked)) .switch-label {
+    color: var(--down);
+    font-weight: 500;
+  }
+
+  /* =====================================================================
+     Results
+     ===================================================================== */
+  .db-error {
+    margin: var(--sp-4) 0;
+  }
+
+  .db-error-msg {
+    margin: var(--sp-2) 0 0;
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    color: var(--ink-1);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .db-result-scroll {
+    max-height: 58vh;
+    overflow: auto;
+  }
+
+  /* The header has to survive scrolling — a wide result set read 40 rows down
+     with no column names is unreadable. */
+  .db-result-scroll thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--bg-2);
+  }
+
+  .table td.cell {
+    max-width: 24rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--fs-xs);
+  }
+
+  .cell-empty {
+    color: var(--ink-3);
+    font-style: italic;
+  }
+
+  @media (max-width: 860px) {
+    .db-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .db-side {
+      position: static;
+    }
+
+    .db-side .table-wrap {
+      max-height: 30vh;
+    }
+  }
+}

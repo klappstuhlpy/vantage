@@ -16,6 +16,7 @@
 //! GET    /ssh/export/authorized_keys   — download active keys as authorized_keys
 
 use crate::{
+    audit,
     session::Account,
     ssh::{self, SshKey, SshSessionAudit, SshToken},
     AppState,
@@ -270,14 +271,11 @@ async fn add_key(
                 Some(peer.ip().to_string()),
                 None,
             );
-            tracing::info!(
-                action = "ssh.key.add",
-                actor = account.name,
-                key_id = id,
-                target = parsed.fingerprint,
-                ip = %peer.ip(),
-                algo = parsed.algo
-            );
+            audit::event("ssh.key.add", &account)
+                .target(&parsed.fingerprint)
+                .detail(serde_json::json!({ "key_id": id, "algo": parsed.algo }))
+                .record(&state.db)
+                .await;
             ssh::sync_authorized_keys(&state);
             Ok((
                 StatusCode::CREATED,
@@ -351,12 +349,10 @@ async fn revoke_key(
         Some(peer.ip().to_string()),
         None,
     );
-    tracing::info!(
-        action = "ssh.key.revoke",
-        actor = account.name,
-        target = format!("key:{id}"),
-        ip = %peer.ip()
-    );
+    audit::event("ssh.key.revoke", &account)
+        .target(format!("key:{id}"))
+        .record(&state.db)
+        .await;
     ssh::sync_authorized_keys(&state);
 
     Ok(StatusCode::NO_CONTENT)
@@ -395,12 +391,10 @@ async fn delete_key(
         Some(peer.ip().to_string()),
         None,
     );
-    tracing::info!(
-        action = "ssh.key.delete",
-        actor = account.name,
-        target = format!("key:{id}"),
-        ip = %peer.ip()
-    );
+    audit::event("ssh.key.delete", &account)
+        .target(format!("key:{id}"))
+        .record(&state.db)
+        .await;
     ssh::sync_authorized_keys(&state);
 
     Ok(StatusCode::NO_CONTENT)
@@ -554,14 +548,11 @@ async fn issue_token(
         Some(peer.ip().to_string()),
         None,
     );
-    tracing::info!(
-        action = "ssh.token.issue",
-        actor = account.name,
-        target = format!("token:{result}"),
-        ip = %peer.ip(),
-        label = label,
-        expires_in_hours = ?payload.expires_in_hours
-    );
+    audit::event("ssh.token.issue", &account)
+        .target(format!("token:{result}"))
+        .detail(serde_json::json!({ "label": label, "expires_in_hours": payload.expires_in_hours }))
+        .record(&state.db)
+        .await;
 
     Ok((
         StatusCode::CREATED,
@@ -613,12 +604,10 @@ async fn revoke_token(
         Some(peer.ip().to_string()),
         None,
     );
-    tracing::info!(
-        action = "ssh.token.revoke",
-        actor = account.name,
-        target = format!("token:{id}"),
-        ip = %peer.ip()
-    );
+    audit::event("ssh.token.revoke", &account)
+        .target(format!("token:{id}"))
+        .record(&state.db)
+        .await;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -656,12 +645,10 @@ async fn delete_token(
         Some(peer.ip().to_string()),
         None,
     );
-    tracing::info!(
-        action = "ssh.token.delete",
-        actor = account.name,
-        target = format!("token:{id}"),
-        ip = %peer.ip()
-    );
+    audit::event("ssh.token.delete", &account)
+        .target(format!("token:{id}"))
+        .record(&state.db)
+        .await;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -788,11 +775,10 @@ async fn export_authorized_keys(State(state): State<AppState>, account: Account)
 
     let body = ssh::render_authorized_keys(&keys);
 
-    tracing::info!(
-        action = "ssh.export.authorized_keys",
-        actor = account.name,
-        key_count = keys.len()
-    );
+    audit::event("ssh.export.authorized_keys", &account)
+        .detail(serde_json::json!({ "key_count": keys.len() }))
+        .record(&state.db)
+        .await;
 
     Ok((
         [

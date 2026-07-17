@@ -1,0 +1,152 @@
+/* Proxy page — composition only. */
+
+@layer pages {
+  .domain {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-2);
+    font-family: var(--font-mono);
+    font-size: var(--fs-sm);
+    color: var(--ink-1);
+    text-decoration: none;
+  }
+
+  .domain:hover {
+    color: var(--acc);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  .domain .icon {
+    width: 12px;
+    height: 12px;
+    color: var(--ink-3);
+  }
+
+  .upstream {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    font-size: var(--fs-sm);
+  }
+
+  .upstream .sub {
+    font-size: var(--fs-xs);
+    color: var(--ink-3);
+  }
+
+  .pill-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-1);
+  }
+
+  .muted {
+    font-size: var(--fs-sm);
+    color: var(--ink-3);
+  }
+
+  tr.is-disabled .domain,
+  tr.is-disabled td {
+    color: var(--ink-2);
+  }
+
+  tr.is-disabled .pill {
+    opacity: 0.75;
+  }
+
+  /* Apply is the button that makes saved routes real. While a change is
+     pending it stops being a quiet secondary action. */
+  #apply-btn.attn {
+    border-color: var(--warn);
+    color: var(--warn);
+  }
+
+  #pending-banner {
+    margin-bottom: var(--sp-4);
+  }
+
+  /* =====================================================================
+     Editor
+     ===================================================================== */
+  .field-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+    margin: 0;
+    padding: var(--sp-4);
+    border: 1px solid var(--line-1);
+    border-radius: var(--r-m);
+  }
+
+  .field-group legend {
+    padding: 0 var(--sp-2);
+    font-size: var(--fs-xs);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--ink-3);
+  }
+
+  .advanced > summary {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    padding: var(--sp-2) 0;
+    cursor: pointer;
+    list-style: none;
+    font-size: var(--fs-sm);
+    color: var(--ink-2);
+  }
+
+  .advanced > summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .advanced > summary:hover {
+    color: var(--ink-1);
+  }
+
+  .advanced .disclosure {
+    color: var(--ink-3);
+    transition: transform var(--dur-fast) var(--ease-out);
+  }
+
+  .advanced[open] .disclosure {
+    transform: rotate(90deg);
+  }
+
+  .advanced-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-4);
+    padding-top: var(--sp-3);
+  }
+
+  /* =====================================================================
+     Config preview
+     ===================================================================== */
+  .config-preview {
+    margin: 0;
+    padding: var(--sp-4);
+    background: var(--bg-0);
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    line-height: 1.6;
+    color: var(--ink-1);
+    white-space: pre;
+    overflow: auto;
+    max-height: 60vh;
+  }
+
+  .preview-file {
+    font-size: var(--fs-xs);
+    color: var(--ink-3);
+  }
+
+  @media (max-width: 720px) {
+    .field-group {
+      padding: var(--sp-3);
+    }
+  }
+}

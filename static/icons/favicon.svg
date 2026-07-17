@@ -1,0 +1,16 @@
+<!--
+  The scope, as a favicon. Same geometry as the sidebar mark in layout.html.
+  Colours are baked rather than tokenised: a favicon renders outside the page,
+  where no CSS custom property exists. It carries its own dark disc so it stays
+  legible on both a light and a dark browser tab strip.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <rect width="24" height="24" rx="5" fill="#0B0F14"/>
+  <g stroke="#2AC3DE" stroke-linecap="round" fill="none">
+    <circle cx="12" cy="12" r="7.5" stroke-width="1.5" opacity=".55"/>
+    <circle cx="12" cy="12" r="4" stroke-width="1" opacity=".3"/>
+    <path d="M12 4.5v15M4.5 12h15" stroke-width="1" opacity=".3"/>
+  </g>
+  <path d="M12 12 L12 4.5 A7.5 7.5 0 0 1 19 9.5 Z" fill="#2AC3DE" opacity=".35"/>
+  <circle cx="12" cy="12" r="1.6" fill="#2AC3DE"/>
+</svg>

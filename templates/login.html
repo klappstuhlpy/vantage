@@ -1,0 +1,21 @@
+{% extends "auth.html" %}
+
+{% block title %}Sign in{% endblock %}
+{% block heading %}Sign in{% endblock %}
+{% block intro %}Control plane for this host.{% endblock %}
+
+{% block form %}
+<form method="post" action="/login" class="auth-form">
+    <div class="field">
+        <label for="username">Username</label>
+        <input class="input" id="username" name="username" autocomplete="username" autofocus required>
+    </div>
+
+    <div class="field">
+        <label for="password">Password</label>
+        <input class="input" id="password" name="password" type="password" autocomplete="current-password" required>
+    </div>
+
+    <button class="btn block lg" type="submit">Sign in</button>
+</form>
+{% endblock %}

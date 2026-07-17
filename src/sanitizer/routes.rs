@@ -9,7 +9,7 @@ use crate::session::Account;
 use crate::AppState;
 use askama::Template;
 use axum::{
-    extract::{Multipart, Path, State},
+    extract::{DefaultBodyLimit, Multipart, Path, State},
     http::StatusCode,
     response::{IntoResponse, Json, Response},
     routing::{delete, get, post},
@@ -241,10 +241,22 @@ async fn scan(State(state): State<AppState>, _account: Account, mut multipart: M
 
 // ─── Router ──────────────────────────────────────────────────────────────────
 
+/// The largest upload the scan endpoint accepts.
+///
+/// This has to be stated, not inherited: axum's default body limit is 2 MB, so
+/// while the UI has always advertised 16 MB, every upload above 2 MB was in
+/// fact rejected with a 413 that the page reported as a generic failure. The
+/// limit is enforced here and rendered from the same constant, so the promise
+/// and the behaviour cannot drift apart again.
+pub const MAX_UPLOAD_BYTES: usize = 16 * 1024 * 1024;
+
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/sanitizer", get(sanitizer_page))
-        .route("/sanitizer/scan", post(scan))
+        .route(
+            "/sanitizer/scan",
+            post(scan).layer(DefaultBodyLimit::max(MAX_UPLOAD_BYTES)),
+        )
         .route("/sanitizer/history", get(history))
         .route("/sanitizer/:id", delete(delete_scan))
 }
@@ -336,8 +348,12 @@ mod tests {
         assert_eq!(res.status(), StatusCode::OK);
         let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
         let html = String::from_utf8_lossy(&body);
-        assert!(html.contains("File Sanitizer"), "page heading missing");
-        assert!(html.contains("sanitizer.js"), "script not linked");
+        assert!(html.contains("<h1>Sanitizer</h1>"), "page heading missing");
+        assert!(html.contains("/static/js/pages/sanitizer.js"), "script not linked");
+        // Neither backend is configured in the test config. The page must warn
+        // that nothing is actually being checked rather than quietly accepting
+        // uploads and reporting no threat.
+        assert!(html.contains("No scanner is configured"), "no-backend warning missing");
 
         // History endpoint returns empty list from the migrated table
         let res = app

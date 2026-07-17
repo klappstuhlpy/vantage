@@ -1,0 +1,166 @@
+/* ==========================================================================
+   Account & security page.
+
+   Composition only. The shapes that turned out to be general — the settings
+   row, the secret reveal, the code input — have moved to components.css; what
+   is left is the enrollment flow and the session table, which are this page's
+   alone.
+   ========================================================================== */
+
+@layer pages {
+  .sudo-note {
+    margin-bottom: var(--sp-5);
+  }
+
+  /* ---------------------------------------------------------------------
+     Forms
+     --------------------------------------------------------------------- */
+  .stack {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-4);
+    /* A password field the width of a table is not more usable, and an input
+       whose text runs to a 1400px line reads as a search bar. */
+    max-width: 42ch;
+  }
+
+  .form-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    flex-wrap: wrap;
+  }
+
+  /* The consequence of the button next to it, not a hint about a field —
+     "signs out everywhere else" is something you want to read *before* you
+     commit, so it sits with the action rather than above it. */
+  .form-note {
+    font-size: var(--fs-sm);
+    color: var(--ink-2);
+  }
+
+  /* The settings row (.setting*) and .section-note moved to components.css —
+     the alerts page composes the same shape. */
+
+  /* ---------------------------------------------------------------------
+     Enrollment
+     --------------------------------------------------------------------- */
+  .steps {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-5);
+    margin: 0;
+    /* Keeps the <ol>'s own markers — the numbers are the point of a two-step
+       flow, so there is no reason to re-invent them with a counter. */
+    padding-left: var(--sp-5);
+  }
+
+  .steps li {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+  }
+
+  .step-text {
+    font-weight: 500;
+  }
+
+  /* The QR is drawn by account.js as a single <path> inside an <svg>, sized
+     by this box. `currentColor` is what makes it themed: the modules inherit
+     the ink colour, so the code inverts correctly in dark mode instead of
+     shipping as a black bitmap that vanishes into a dark card.
+
+     The white plate underneath is not a theme violation — it is the quiet
+     zone. Scanners need the light/dark polarity a QR spec assumes, and enough
+     margin around it, or a fraction of phones simply will not lock on. Being
+     legible beats being on-brand for the ten seconds this is on screen. */
+  .qr {
+    align-self: center;
+    padding: var(--sp-4);
+    background: #fff;
+    border-radius: var(--r-m);
+    line-height: 0;
+  }
+
+  .qr svg {
+    width: 180px;
+    height: 180px;
+    color: #000;
+  }
+
+  .manual {
+    font-size: var(--fs-sm);
+  }
+
+  .manual summary {
+    cursor: pointer;
+    color: var(--ink-2);
+    width: fit-content;
+  }
+
+  .manual summary:hover {
+    color: var(--ink-1);
+  }
+
+  .manual-sub {
+    margin: var(--sp-3) 0 var(--sp-2);
+    color: var(--ink-2);
+  }
+
+  /* ---------------------------------------------------------------------
+     Recovery codes
+     --------------------------------------------------------------------- */
+  .codes {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--sp-2) var(--sp-4);
+    margin-top: var(--sp-4);
+    padding: var(--sp-4);
+    list-style: none;
+    background: var(--bg-0);
+    border: 1px solid var(--acc-line);
+    border-radius: var(--r-m);
+  }
+
+  .codes li {
+    font-family: var(--font-mono);
+    font-size: var(--fs-md);
+    /* Same reasoning as .token-value: this is here to be selected. */
+    user-select: all;
+  }
+
+  /* ---------------------------------------------------------------------
+     Sessions
+     --------------------------------------------------------------------- */
+  .device {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+  }
+
+  .device .icon {
+    color: var(--ink-3);
+  }
+
+  .device-name {
+    font-weight: 500;
+  }
+
+  .device-sub {
+    font-size: var(--fs-xs);
+    color: var(--ink-3);
+  }
+
+  /* This row is the browser you are reading this in. It gets a marker rather
+     than a disabled Revoke button, because "you cannot revoke this one" is a
+     different statement from "revoking is unavailable". */
+  tr.is-current td:first-child {
+    box-shadow: inset 2px 0 0 var(--acc);
+  }
+
+  @media (max-width: 720px) {
+    .codes {
+      grid-template-columns: 1fr;
+    }
+  }
+}

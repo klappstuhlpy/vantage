@@ -1,92 +1,260 @@
 {#
-    Vantage shell — a self-contained admin layout (no site base template).
+    Vantage app shell.
 
-    Child templates must:
-      - extend layout.html
-      - override {% block content %}{% endblock %}
-      - expose `account: Option<Account>` and `active_page: &'static str`
+    ── Block contract (the ONLY blocks this layout defines) ─────────────────
+      title    page title, inside "… | Vantage"
+      head     extra <head> content — page CSS, vendored chart CSS
+      content  the page body, inside <main>
+      scripts  page JS, loaded after the shell's own modules
 
-    The whole app is the admin surface (it runs on its own admin host), so routes
-    and assets carry no `/admin` prefix — pages sit at bare paths (`/metrics`,
-    `/monitors`, `/database`, `/logs/view`).
+    A child template that overrides any other block name silently renders
+    nothing — that is not hypothetical: the old layout defined `head_css` while
+    security.html overrode `extra_head`/`body_end`, so that page shipped for
+    months with its CSS and JS never reaching the browser and nobody noticing.
+    Askama cannot catch an unused block, so the rule is: these four names, and
+    if you need a fifth, add it here first.
 
-    The sidebar nav intentionally lists ONLY the pages that exist in Vantage
-    today; it grows as each feature slice moves in (ADMIN_SEPARATION_PLAN Phase 4,
-    Steps C+). Design tokens come from the shared design system at /kls/base.css;
-    a small app.css adds the shell/nav chrome.
+    ── Context contract ────────────────────────────────────────────────────
+    Every page struct must expose:
+      account: Option<Account>     — rendered in the sidebar footer
+      active_page: &'static str    — one of the `data-page` values below;
+                                     drives aria-current on the nav
+
+    ── Assets ──────────────────────────────────────────────────────────────
+    Everything is local (see static/README.md). theme-init.js is the one
+    render-blocking script and must stay in <head>, before the stylesheets, or
+    a light-theme browser flashes dark on every navigation. There is no inline
+    JS anywhere in this app, so a strict CSP needs no nonce pipeline.
 #}
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="robots" content="noindex, nofollow">
-    <title>{% block title %}Admin | Vantage{% endblock %}</title>
-    <link rel="stylesheet" href="/kls/base.css" type="text/css">
-    <link rel="stylesheet" href="/static/css/app.css" type="text/css">
-    {% block head_css %}{% endblock %}
+    <meta name="color-scheme" content="dark light">
+    <title>{% block title %}Vantage{% endblock %}</title>
+
+    {# Stamps data-theme/-accent/-density on <html> before first paint. #}
+    <script src="/static/js/core/theme-init.js"></script>
+
+    <link rel="icon" href="/static/icons/favicon.svg" type="image/svg+xml">
+    <link rel="preload" href="/static/fonts/plex-sans-400.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/static/fonts/plex-mono-400.woff2" as="font" type="font/woff2" crossorigin>
+
+    <link rel="stylesheet" href="/static/css/tokens.css">
+    <link rel="stylesheet" href="/static/css/base.css">
+    <link rel="stylesheet" href="/static/css/components.css">
+    <link rel="stylesheet" href="/static/css/shell.css">
+    {% block head %}{% endblock %}
 </head>
 <body>
-<div class="admin-shell">
-    <aside class="admin-sidebar" id="admin-sidebar">
-        <div class="admin-sidebar-title"><span class="spark" aria-hidden="true">✻</span> Vantage</div>
-        <nav class="admin-nav">
-            <a href="/" class="admin-nav-item{% if active_page == "home" %} active{% endif %}">
-                <span>Home</span>
-            </a>
-            <a href="/metrics" class="admin-nav-item{% if active_page == "metrics" %} active{% endif %}">
-                <span>Metrics</span>
-            </a>
-            <a href="/docker" class="admin-nav-item{% if active_page == "docker" %} active{% endif %}">
-                <span>Docker</span>
-            </a>
-            <a href="/docker/snapshots" class="admin-nav-item{% if active_page == "snapshots" %} active{% endif %}">
-                <span>Snapshots</span>
-            </a>
-            <a href="/monitors" class="admin-nav-item{% if active_page == "health" %} active{% endif %}">
-                <span>Health</span>
-            </a>
-            <a href="/firewall" class="admin-nav-item{% if active_page == "firewall" %} active{% endif %}">
-                <span>Firewall</span>
-            </a>
-            <a href="/secrets" class="admin-nav-item{% if active_page == "secrets" %} active{% endif %}">
-                <span>Secrets</span>
-            </a>
-            <a href="/sanitizer" class="admin-nav-item{% if active_page == "sanitizer" %} active{% endif %}">
-                <span>Sanitizer</span>
-            </a>
-            <a href="/proxy" class="admin-nav-item{% if active_page == "proxy" %} active{% endif %}">
-                <span>Proxy</span>
-            </a>
-            <a href="/certs" class="admin-nav-item{% if active_page == "certs" %} active{% endif %}">
-                <span>Certs</span>
-            </a>
-            <a href="/ssh" class="admin-nav-item{% if active_page == "ssh" %} active{% endif %}">
-                <span>SSH</span>
-            </a>
-            <a href="/backups" class="admin-nav-item{% if active_page == "backups" %} active{% endif %}">
-                <span>Backups</span>
-            </a>
-            <a href="/security" class="admin-nav-item{% if active_page == "security" %} active{% endif %}">
-                <span>Security</span>
-            </a>
-            <a href="/database" class="admin-nav-item{% if active_page == "database" %} active{% endif %}">
-                <span>Database</span>
-            </a>
-            <a href="/logs/view" class="admin-nav-item{% if active_page == "logs" %} active{% endif %}">
-                <span>Logs</span>
-            </a>
+<a class="skip-link" href="#main">Skip to content</a>
+
+<div class="app">
+    <aside class="sidebar" id="sidebar" aria-label="Sections">
+        <a class="brand" href="/">
+            {#
+                The scope is the brand mark and the live indicator at once: the
+                sweep is driven by [data-live] on <html> (see shell.css), which
+                core/live.js sets from the real socket state. It animates only
+                while we are genuinely connected.
+            #}
+            <svg class="scope" viewBox="0 0 24 24" aria-hidden="true">
+                <circle class="scope-ring" cx="12" cy="12" r="9"/>
+                <circle class="scope-grid" cx="12" cy="12" r="5" fill="none"/>
+                <path class="scope-grid" d="M12 3v18M3 12h18" fill="none"/>
+                <path class="scope-sweep" d="M12 12 L12 3 A9 9 0 0 1 20.5 9 Z"/>
+                <circle class="scope-dot" cx="12" cy="12" r="1.5"/>
+            </svg>
+            <span class="brand-name">Vantage</span>
+        </a>
+
+        <nav class="nav">
+            <div class="nav-group">
+                <span class="nav-group-label">Overview</span>
+                <a href="/" class="nav-item" data-page="home"{% if active_page == "home" %} aria-current="page"{% endif %}>
+                    <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#layout-dashboard"/></svg>
+                    <span class="nav-item-label">Home</span>
+                </a>
+                <a href="/metrics" class="nav-item" data-page="metrics"{% if active_page == "metrics" %} aria-current="page"{% endif %}>
+                    <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#activity"/></svg>
+                    <span class="nav-item-label">Metrics</span>
+                </a>
+                <a href="/monitors" class="nav-item" data-page="health"{% if active_page == "health" %} aria-current="page"{% endif %}>
+                    <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#heart-pulse"/></svg>
+                    <span class="nav-item-label">Health</span>
+                </a>
+            </div>
+
+            <div class="nav-group">
+                <span class="nav-group-label">Runtime</span>
+                <a href="/docker" class="nav-item" data-page="docker"{% if active_page == "docker" %} aria-current="page"{% endif %}>
+                    <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#container"/></svg>
+                    <span class="nav-item-label">Docker</span>
+                </a>
+                <a href="/docker/snapshots" class="nav-item" data-page="snapshots"{% if active_page == "snapshots" %} aria-current="page"{% endif %}>
+                    <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#camera"/></svg>
+                    <span class="nav-item-label">Snapshots</span>
+                </a>
+                <a href="/proxy" class="nav-item" data-page="proxy"{% if active_page == "proxy" %} aria-current="page"{% endif %}>
+                    <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#route"/></svg>
+                    <span class="nav-item-label">Proxy</span>
+                </a>
+                <a href="/certs" class="nav-item" data-page="certs"{% if active_page == "certs" %} aria-current="page"{% endif %}>
+                    <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#badge-check"/></svg>
+                    <span class="nav-item-label">Certificates</span>
+                </a>
+            </div>
+
+            <div class="nav-group">
+                <span class="nav-group-label">Protect</span>
+                <a href="/firewall" class="nav-item" data-page="firewall"{% if active_page == "firewall" %} aria-current="page"{% endif %}>
+                    <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#brick-wall"/></svg>
+                    <span class="nav-item-label">Firewall</span>
+                </a>
+                <a href="/security" class="nav-item" data-page="security" {% if active_page == "security" %} aria-current="page"{% endif %}>
+                    <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#shield"/></svg>
+                    <span class="nav-item-label">Security</span>
+                </a>
+                <a href="/secrets" class="nav-item" data-page="secrets"{% if active_page == "secrets" %} aria-current="page"{% endif %}>
+                    <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#key-round"/></svg>
+                    <span class="nav-item-label">Secrets</span>
+                </a>
+                <a href="/sanitizer" class="nav-item" data-page="sanitizer"{% if active_page == "sanitizer" %} aria-current="page"{% endif %}>
+                    <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#spray-can"/></svg>
+                    <span class="nav-item-label">Sanitizer</span>
+                </a>
+                <a href="/ssh" class="nav-item" data-page="ssh"{% if active_page == "ssh" %} aria-current="page"{% endif %}>
+                    <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#terminal"/></svg>
+                    <span class="nav-item-label">SSH</span>
+                </a>
+            </div>
+
+            <div class="nav-group">
+                <span class="nav-group-label">System</span>
+                <a href="/backups" class="nav-item" data-page="backups"{% if active_page == "backups" %} aria-current="page"{% endif %}>
+                    <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#archive"/></svg>
+                    <span class="nav-item-label">Backups</span>
+                </a>
+                <a href="/database" class="nav-item" data-page="database"{% if active_page == "database" %} aria-current="page"{% endif %}>
+                    <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#database"/></svg>
+                    <span class="nav-item-label">Database</span>
+                </a>
+                <a href="/logs/view" class="nav-item" data-page="logs"{% if active_page == "logs" %} aria-current="page"{% endif %}>
+                    <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#scroll-text"/></svg>
+                    <span class="nav-item-label">Logs</span>
+                </a>
+                <a href="/scripts" class="nav-item" data-page="scripts"{% if active_page == "scripts" %} aria-current="page"{% endif %}>
+                    <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#square-terminal"/></svg>
+                    <span class="nav-item-label">Scripts</span>
+                </a>
+                <a href="/audit" class="nav-item" data-page="audit"{% if active_page == "audit" %} aria-current="page"{% endif %}>
+                    <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#history"/></svg>
+                    <span class="nav-item-label">Audit log</span>
+                </a>
+                <a href="/alerts" class="nav-item" data-page="alerts"{% if active_page == "alerts" %} aria-current="page"{% endif %}>
+                    <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#bell"/></svg>
+                    <span class="nav-item-label">Alerts</span>
+                </a>
+                <a href="/settings" class="nav-item" data-page="settings"{% if active_page == "settings" %} aria-current="page"{% endif %}>
+                    <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#settings"/></svg>
+                    <span class="nav-item-label">Settings</span>
+                </a>
+                <a href="/account" class="nav-item" data-page="account"{% if active_page == "account" %} aria-current="page"{% endif %}>
+                    <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#user-cog"/></svg>
+                    <span class="nav-item-label">Account</span>
+                </a>
+            </div>
         </nav>
-        <div class="admin-sidebar-footer">
-            {% if let Some(account) = account %}
-            <span class="admin-whoami">{{ account.name }}</span>
-            {% endif %}
-            <a href="/logout" class="admin-signout">Sign out</a>
+
+        <div class="sidebar-foot">
+            {% match account %}
+            {% when Some with (account) %}
+            <button class="account-btn" id="account-btn" type="button">
+                {#
+                    An avatar is decorative; the name beside it is the accessible
+                    label, so the initial is hidden from assistive tech rather
+                    than read out as a stray letter.
+                #}
+                <span class="avatar" aria-hidden="true">{{ account.initial() }}</span>
+                <span class="account-name">{{ account.name }}</span>
+                <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#chevron-up"/></svg>
+            </button>
+            <div class="menu" id="account-menu">
+                <div class="menu-label">{{ account.name }}</div>
+                <a class="menu-item" href="/account">
+                    <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#user-cog"/></svg>
+                    Account &amp; security
+                </a>
+                <a class="menu-item" href="/logout">
+                    <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#log-out"/></svg>
+                    Sign out
+                </a>
+            </div>
+            {% when None %}
+            <a class="account-btn" href="/login">
+                <span class="avatar" aria-hidden="true">?</span>
+                <span class="account-name">Sign in</span>
+            </a>
+            {% endmatch %}
         </div>
     </aside>
-    <section class="admin-content">
-        {% block content %}{% endblock %}
-    </section>
+
+    <div class="main">
+        <header class="topbar">
+            <button class="icon-btn nav-toggle" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="sidebar">
+                <svg class="icon icon-20" aria-hidden="true"><use href="/static/icons/sprite.svg#menu"/></svg>
+            </button>
+
+            <button class="topbar-search" id="search-btn" type="button">
+                <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#search"/></svg>
+                <span class="topbar-search-label">Search…</span>
+                <span class="kbd">Ctrl K</span>
+            </button>
+
+            <span class="spacer"></span>
+
+            {#
+                One live indicator for the whole app. Pages used to each invent
+                their own "live"/"polling" label and drift out of step; this one
+                reports the actual socket.
+            #}
+            <span class="live-badge" role="status" aria-live="polite" data-tip="Live connection to this host" data-tip-pos="left">
+                <span class="sr-only">Connection:</span>
+                {# The state word is CSS ::after content keyed off [data-live] —
+                   see shell.css. Keeping it in CSS means no JS has to remember
+                   to update a label, which is exactly how the old per-page
+                   indicators drifted out of step with reality. #}
+                <span class="live-badge-text"></span>
+            </span>
+
+            {#
+                Global safe mode. The button reflects the live state (amber when
+                engaged) and toggling is sudo-gated on the server; core/safemode.js
+                wires it, raises the banner and sets body.is-safe-mode so the CSS
+                can disable every destructive control at once.
+            #}
+            <button class="icon-btn safemode-btn" id="safemode-btn" type="button" aria-pressed="false" aria-label="Safe mode" data-tip="Safe mode: host changes allowed" data-tip-pos="bottom">
+                <svg class="icon icon-20" aria-hidden="true"><use href="/static/icons/sprite.svg#lock-open"/></svg>
+            </button>
+
+            <button class="icon-btn sidebar-collapse" type="button" aria-label="Collapse sidebar" aria-expanded="true">
+                <svg class="icon icon-20" aria-hidden="true"><use href="/static/icons/sprite.svg#panel-left-close"/></svg>
+            </button>
+
+            <button class="icon-btn" id="appearance-btn" type="button" aria-label="Appearance">
+                <svg class="icon icon-20" aria-hidden="true"><use href="/static/icons/sprite.svg#sliders-horizontal"/></svg>
+            </button>
+        </header>
+
+        <main class="content" id="main">
+            {% block content %}{% endblock %}
+        </main>
+    </div>
 </div>
+
+<script type="module" src="/static/js/core/shell.js"></script>
+{% block scripts %}{% endblock %}
 </body>
 </html>

@@ -1,0 +1,312 @@
+/* ==========================================================================
+   Vantage design tokens — "Overwatch"
+   --------------------------------------------------------------------------
+   The single source of truth for every color, size, and duration in the UI.
+   Nothing below this file hard-codes a hex value; if you find yourself typing
+   one in a component, add a token here instead.
+
+   Layer order is declared here, once, and fixes the cascade for the whole app
+   regardless of <link> order: page CSS can always override a component without
+   !important or selector escalation.
+   ========================================================================== */
+
+@layer tokens, base, components, shell, pages;
+
+@layer tokens {
+  /* ---------------------------------------------------------------------
+     Dark theme (default). Deep blue-slate, never pure black: pure black on
+     an LCD produces halation around light text, and the blue cast keeps the
+     status hues (which are warm) legible against it.
+     --------------------------------------------------------------------- */
+  :root,
+  :root[data-theme='dark'] {
+    color-scheme: dark;
+
+    /* Surfaces, in elevation order. Each step is a real surface, not a shadow. */
+    --bg-0: #0b0f14; /* page background          */
+    --bg-1: #11161d; /* card / panel             */
+    --bg-2: #161e28; /* raised: input, menu, thead */
+    --bg-3: #1c2634; /* overlay: modal, palette  */
+    --bg-hover: rgba(255, 255, 255, 0.04);
+    --bg-active: rgba(255, 255, 255, 0.07);
+
+    /* Lines come in three weights on purpose. WCAG 1.4.11 wants 3:1 for the
+       boundary that *identifies a control* — but not for decorative rules, and
+       applying 3:1 to every hairline would make the whole UI shout. So:
+         --line-1    hairlines (card edges, table rules) — decorative, exempt
+         --line-2    structural dividers and overlay edges — exempt
+         --line-ctl  input/switch/checkbox/outline-button borders — >= 3:1
+       Use --line-ctl for anything the user is meant to click or type into. */
+    --line-1: #1f2937;
+    --line-2: #2e3d4f;
+    --line-ctl: #567395;
+
+    /* Ink. A three-step ramp at roughly 16 / 7.5 / 4.6 against a card: every
+       step is real text somewhere (--ink-3 renders chart axes, timestamps,
+       hints and placeholders), so all three clear AA 4.5. Disabled controls
+       dim with opacity instead, which WCAG exempts. */
+    --ink-1: #e9eff5; /* primary text                 */
+    --ink-2: #94a3b4; /* secondary / labels           */
+    --ink-3: #7f8fa1; /* tertiary: hints, axes, faint */
+    --ink-on-acc: #04141a; /* text on an accent-filled surface */
+
+    /* Brand accent — overridden by the accent presets below. */
+    --acc: #2ac3de;
+    --acc-hi: #6bd9ec;
+    --acc-soft: rgba(42, 195, 222, 0.13);
+    --acc-line: rgba(42, 195, 222, 0.4);
+
+    /* Semantic status. Fixed across every accent preset: status must never
+       depend on a cosmetic choice. */
+    --ok: #3ecf8e;
+    --ok-soft: rgba(62, 207, 142, 0.12);
+    --warn: #fdb022;
+    --warn-soft: rgba(253, 176, 34, 0.12);
+    --down: #f97066;
+    --down-soft: rgba(249, 112, 102, 0.12);
+    --idle: #a78bfa;
+    --idle-soft: rgba(167, 139, 250, 0.12);
+    --info: #60a5fa;
+    --info-soft: rgba(96, 165, 250, 0.12);
+
+    /* Chart series — a categorical palette, and deliberately NOT tied to --acc.
+       Two rules it has to obey that the rest of the palette doesn't:
+         1. Series identity must not move when the user picks a cosmetic accent.
+            (An earlier draft had --ch-1: var(--acc); with the Amber preset that
+            silently repainted series 1 on top of the orange series 2.)
+         2. Status hues are reserved. A series is never --ok/--warn/--down, so a
+            green line never gets misread as "healthy".
+       Steps sit inside OKLCH L 0.48–0.67 with chroma >= 0.1 and are verified for
+       protan/deutan/tritan separation against --bg-1 — see the note in chart.js
+       for how to re-check them. */
+    --ch-1: #28a0c7;
+    --ch-2: #d67522;
+    --ch-3: #a376e9;
+    --ch-4: #28ad57;
+    --ch-grid: var(--line-1);
+
+    /* Elevation — softened and layered so a floating surface reads as lifted,
+       not stamped. Each level pairs a wide ambient shadow with a tight contact
+       one; that two-part falloff is what makes glass feel like it hovers. */
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.28), 0 1px 1px rgba(0, 0, 0, 0.16);
+    --shadow-2: 0 6px 20px -4px rgba(0, 0, 0, 0.4), 0 2px 6px -2px rgba(0, 0, 0, 0.3);
+    --shadow-3: 0 24px 60px -12px rgba(0, 0, 0, 0.55), 0 8px 24px -8px rgba(0, 0, 0, 0.42);
+    --scrim: rgba(6, 9, 12, 0.66);
+
+    /* Glass — the material for anything that floats above the page (topbar,
+       menus, modals, palette, drawer). A translucent tint plus a real blur, so
+       the content behind refracts through rather than being hidden by an opaque
+       slab. The 1px inner highlight is the lit top edge that sells the depth.
+       Used only on overlays: a card sits on the flat --bg-0 with nothing behind
+       it, so blurring there buys muddiness and no refraction. */
+    --glass-bg: color-mix(in srgb, var(--bg-3) 78%, transparent);
+    --glass-bg-strong: color-mix(in srgb, var(--bg-3) 88%, transparent);
+    --glass-border: color-mix(in srgb, var(--line-2) 85%, transparent);
+    --glass-blur: 18px;
+    --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+
+    /* Status glow — the one deliberate flourish (§3). Used sparingly, only on
+       cards reporting a real problem. */
+    --glow-down: inset 0 0 24px -6px rgba(249, 112, 102, 0.35);
+    --glow-warn: inset 0 0 24px -6px rgba(253, 176, 34, 0.28);
+    --glow-acc: 0 0 18px -4px var(--acc-line);
+  }
+
+  /* ---------------------------------------------------------------------
+     Light theme. Not an inversion — hues are darkened a step so text and UI
+     glyphs still clear AA on white.
+     --------------------------------------------------------------------- */
+  :root[data-theme='light'] {
+    color-scheme: light;
+
+    --bg-0: #f4f6f9;
+    --bg-1: #ffffff;
+    --bg-2: #f8fafc;
+    --bg-3: #ffffff;
+    --bg-hover: rgba(15, 30, 50, 0.04);
+    --bg-active: rgba(15, 30, 50, 0.07);
+
+    --line-1: #e3e9f0;
+    --line-2: #cbd5e1;
+    --line-ctl: #728dae;
+
+    --ink-1: #17212d;
+    --ink-2: #485564;
+    --ink-3: #607184;
+    --ink-on-acc: #ffffff;
+
+    --acc: #0e7f96;
+    --acc-hi: #0a6376;
+    --acc-soft: rgba(14, 127, 150, 0.1);
+    --acc-line: rgba(14, 127, 150, 0.35);
+
+    --ok: #167a52;
+    --ok-soft: rgba(22, 122, 82, 0.1);
+    --warn: #9a6100;
+    --warn-soft: rgba(154, 97, 0, 0.1);
+    --down: #c0362c;
+    --down-soft: rgba(192, 54, 44, 0.1);
+    --idle: #6d43d6;
+    --idle-soft: rgba(109, 67, 214, 0.1);
+    --info: #1d63c4;
+    --info-soft: rgba(29, 99, 196, 0.1);
+
+    /* Light-theme series: re-stepped against a white surface, not flipped. */
+    --ch-1: #2086a7;
+    --ch-2: #b4611b;
+    --ch-3: #8b5dce;
+    --ch-4: #209148;
+    --ch-grid: var(--line-1);
+
+    --shadow-1: 0 1px 2px rgba(15, 30, 50, 0.06), 0 1px 1px rgba(15, 30, 50, 0.04);
+    --shadow-2: 0 6px 20px -4px rgba(15, 30, 50, 0.12), 0 2px 6px -2px rgba(15, 30, 50, 0.08);
+    --shadow-3: 0 24px 60px -12px rgba(15, 30, 50, 0.2), 0 8px 24px -8px rgba(15, 30, 50, 0.12);
+    --scrim: rgba(23, 33, 45, 0.4);
+
+    /* Light-theme glass: a near-white tint over a bright page, and the highlight
+       flips to a strong white top edge that reads as a lit bevel on light. */
+    --glass-bg: color-mix(in srgb, var(--bg-3) 72%, transparent);
+    --glass-bg-strong: color-mix(in srgb, var(--bg-3) 85%, transparent);
+    --glass-border: color-mix(in srgb, var(--line-2) 70%, transparent);
+    --glass-blur: 18px;
+    --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+
+    --glow-down: inset 0 0 24px -6px rgba(192, 54, 44, 0.18);
+    --glow-warn: inset 0 0 24px -6px rgba(154, 97, 0, 0.16);
+    --glow-acc: 0 0 18px -6px var(--acc-line);
+  }
+
+  /* ---------------------------------------------------------------------
+     Accent presets. Only the --acc* family changes; status colors never do,
+     so "green = healthy" survives every preset — including the Phosphor
+     preset, where accent and --ok are deliberately kept distinguishable by
+     reserving accent for interactive elements only.
+     --------------------------------------------------------------------- */
+  :root[data-accent='phosphor'] {
+    --acc: #3ecf8e;
+    --acc-hi: #6fe0ab;
+    --acc-soft: rgba(62, 207, 142, 0.13);
+    --acc-line: rgba(62, 207, 142, 0.4);
+  }
+  :root[data-accent='amber'] {
+    --acc: #fdb022;
+    --acc-hi: #ffc75a;
+    --acc-soft: rgba(253, 176, 34, 0.13);
+    --acc-line: rgba(253, 176, 34, 0.4);
+  }
+  :root[data-accent='ion'] {
+    --acc: #a78bfa;
+    --acc-hi: #c4b1fd;
+    --acc-soft: rgba(167, 139, 250, 0.13);
+    --acc-line: rgba(167, 139, 250, 0.4);
+  }
+  :root[data-accent='ember'] {
+    --acc: #f97066;
+    --acc-hi: #fd958d;
+    --acc-soft: rgba(249, 112, 102, 0.13);
+    --acc-line: rgba(249, 112, 102, 0.4);
+  }
+
+  /* Light-theme accent presets need their own (darker) values for AA. */
+  :root[data-theme='light'][data-accent='phosphor'] {
+    --acc: #167a52;
+    --acc-hi: #0f5c3d;
+    --acc-soft: rgba(22, 122, 82, 0.1);
+    --acc-line: rgba(22, 122, 82, 0.35);
+  }
+  :root[data-theme='light'][data-accent='amber'] {
+    --acc: #8a5600;
+    --acc-hi: #6b4300;
+    --acc-soft: rgba(138, 86, 0, 0.1);
+    --acc-line: rgba(138, 86, 0, 0.35);
+  }
+  :root[data-theme='light'][data-accent='ion'] {
+    --acc: #6d43d6;
+    --acc-hi: #5731ad;
+    --acc-soft: rgba(109, 67, 214, 0.1);
+    --acc-line: rgba(109, 67, 214, 0.35);
+  }
+  :root[data-theme='light'][data-accent='ember'] {
+    --acc: #c0362c;
+    --acc-hi: #9a2a22;
+    --acc-soft: rgba(192, 54, 44, 0.1);
+    --acc-line: rgba(192, 54, 44, 0.35);
+  }
+
+  /* ---------------------------------------------------------------------
+     Non-color tokens — identical in every theme.
+     --------------------------------------------------------------------- */
+  :root {
+    /* Type */
+    --font-sans: 'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, monospace;
+
+    --fs-xs: 0.6875rem; /* 11    — eyebrows, table headers   */
+    --fs-sm: 0.78125rem; /* 12.5 — dense data, hints          */
+    --fs-md: 0.875rem; /* 14    — base                       */
+    --fs-lg: 1rem; /* 16      — card titles                */
+    --fs-xl: 1.25rem; /* 20   — stat values                 */
+    --fs-2xl: 1.5rem; /* 24   — page titles                 */
+    --fs-3xl: 2rem; /* 32     — hero numbers                */
+
+    --lh-tight: 1.2;
+    --lh-body: 1.5;
+    --tracking-eyebrow: 0.08em;
+    --tracking-display: -0.02em;
+
+    /* Space — a 4px base scale. Every gap/padding in the app is one of these. */
+    --sp-1: 4px;
+    --sp-2: 8px;
+    --sp-3: 12px;
+    --sp-4: 16px;
+    --sp-5: 24px;
+    --sp-6: 32px;
+    --sp-7: 48px;
+
+    /* Shape — rounder than a typical control plane on purpose. The softer
+       corners are the through-line of the fluent look; the scale still steps
+       cleanly (control → panel → hero) so nesting a field in a card in a modal
+       keeps concentric, not clashing, radii. */
+    --r-s: 9px;
+    --r-m: 14px;
+    --r-l: 20px;
+    --r-full: 999px;
+
+    /* Motion. Hover/press is quick; enter/exit gets a decelerating curve so
+       overlays feel placed rather than thrown. base.css zeroes these under
+       prefers-reduced-motion, so components never branch on it themselves. */
+    --dur-fast: 140ms;
+    --dur-mid: 220ms;
+    --ease-out: cubic-bezier(0.33, 1, 0.68, 1);
+    --ease-enter: cubic-bezier(0.2, 0.9, 0.3, 1);
+
+    /* Density — overridden by [data-density="compact"] below. Components read
+       these instead of the raw --sp-* scale wherever density should bite. */
+    --row-h: 40px;
+    --row-pad-y: var(--sp-3);
+    --card-pad: var(--sp-5);
+    --field-h: 34px;
+
+    /* Frame */
+    --sidebar-w: 232px;
+    --sidebar-rail-w: 60px;
+    --topbar-h: 52px;
+    --content-max: 1600px;
+
+    /* Stacking. Kept in one place so no component invents a magic z-index. */
+    --z-sticky: 10;
+    --z-drawer: 40;
+    --z-topbar: 50;
+    --z-menu: 60;
+    --z-modal: 70;
+    --z-toast: 80;
+    --z-palette: 90;
+  }
+
+  :root[data-density='compact'] {
+    --row-h: 32px;
+    --row-pad-y: var(--sp-2);
+    --card-pad: var(--sp-4);
+    --field-h: 30px;
+  }
+}

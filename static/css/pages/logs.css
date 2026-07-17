@@ -1,0 +1,88 @@
+/* Logs page — composition only. The log rows themselves are the shared
+   .log-view component (components.css), which the Docker log console uses too. */
+
+@layer pages {
+  .log-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-3);
+    border-bottom: 1px solid var(--line-1);
+  }
+
+  .log-search {
+    flex: 1 1 240px;
+    min-width: 0;
+  }
+
+  /* A label beside its control rather than above it — the toolbar is one row,
+     not a form. */
+  .field.inline {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--sp-2);
+  }
+
+  .field.inline .select {
+    width: auto;
+  }
+
+  /* The viewer owns the page's vertical space: it is the content, and a log you
+     have to scroll the page to read is a log you stop reading. */
+  #view {
+    border: 0;
+    border-radius: 0;
+    height: min(62vh, 720px);
+  }
+
+  .log-target {
+    flex: none;
+    max-width: 12rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--ink-3);
+  }
+
+  /* The highlight is carried by the background and the underline, with the text
+     left at --ink-1. Recolouring the text to --acc-hi would look sharper, but
+     that token is not in the contrast audit's ink/surface matrix — it varies
+     across five accents and two themes, and a search hit is the one word on the
+     page that must stay readable. */
+  .log-msg mark {
+    padding: 0 2px;
+    background: var(--acc-soft);
+    color: var(--ink-1);
+    border-bottom: 1px solid var(--acc);
+    border-radius: 2px;
+  }
+
+  .log-foot {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+  }
+
+  .log-foot .dim {
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    color: var(--ink-3);
+  }
+
+  @media (max-width: 720px) {
+    .log-toolbar {
+      gap: var(--sp-2);
+    }
+
+    /* The target is the first thing to go: on a narrow screen the message is
+       the only column that matters. */
+    .log-target {
+      display: none;
+    }
+
+    #view {
+      height: 60vh;
+      font-size: var(--fs-xs);
+    }
+  }
+}

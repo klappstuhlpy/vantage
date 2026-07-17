@@ -1,7 +1,14 @@
-//! Admin dashboard landing page (`GET /`).
+//! The home page (`GET /`) — a customisable widget dashboard.
 //!
-//! A glanceable overview: summary tiles (services, monitors, firewall rules,
-//! secret findings), recent Docker events, and quick-nav to each section.
+//! The page itself is deliberately thin. It renders the frame, a set of
+//! capability flags, and an empty grid; every widget then fetches its own slice
+//! from that slice's existing `/data` endpoint (see `static/js/pages/dashboard.js`).
+//! Nothing here aggregates other slices' data, which is what lets a widget be
+//! added or removed without touching this file.
+//!
+//! The counts below are the exception: they are cheap, they come from slices
+//! this handler already had to touch, and rendering them server-side means the
+//! page has real content in its first paint rather than a grid of spinners.
 
 use crate::{health, proxy, session::Account, AppState};
 use askama::Template;
@@ -17,7 +24,11 @@ struct DashboardTemplate {
     monitors_up: usize,
     monitors_down: usize,
     proxy_route_count: usize,
+    /// Capability flags. The frontend reads these off the grid element and
+    /// renders a widget's degraded state *without* a request, so a host with no
+    /// Docker socket doesn't fire a round of doomed fetches on every load.
     docker_available: bool,
+    firewall_available: bool,
 }
 
 async fn page(State(state): State<AppState>, account: Account) -> DashboardTemplate {
@@ -41,6 +52,7 @@ async fn page(State(state): State<AppState>, account: Account) -> DashboardTempl
         monitors_down,
         proxy_route_count: proxy_routes.len(),
         docker_available: state.docker().is_some(),
+        firewall_available: state.firewall_backend().is_some(),
     }
 }
 

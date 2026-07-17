@@ -1,0 +1,182 @@
+/* ==========================================================================
+   Scripts page — configured scripts, their schedules, and run output.
+   ========================================================================== */
+
+@layer pages {
+  .script-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+    gap: var(--sp-3);
+  }
+
+  .script {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+    padding: var(--sp-4);
+    background: var(--bg-1);
+    border: 1px solid var(--line-1);
+    border-radius: var(--r-m);
+  }
+
+  /* Ctrl+K landed you here. The ring fades after a couple of seconds — long
+     enough to find the card in a grid of twelve, short enough not to look like
+     a selected state you have to dismiss. */
+  .script.is-target {
+    border-color: var(--acc-line);
+    box-shadow: var(--glow-acc);
+  }
+
+  .script-head {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+  }
+
+  .script-head .icon {
+    color: var(--ink-3);
+  }
+
+  .script-name {
+    font-weight: 600;
+  }
+
+  .script-body {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: var(--sp-2);
+    min-width: 0;
+  }
+
+  .script-desc {
+    margin: 0;
+    font-size: var(--fs-sm);
+    color: var(--ink-2);
+  }
+
+  /* The command, shown in full and never truncated: this is the one thing on
+     the page that says what pressing Run will actually do to the host, and a
+     command line elided at the fold is one you have to trust instead of read. */
+  .script-command,
+  .modal-body > .script-command {
+    display: block;
+    padding: var(--sp-2) var(--sp-3);
+    background: var(--bg-0);
+    border: 1px solid var(--line-1);
+    border-radius: var(--r-s);
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    color: var(--ink-1);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .script-cwd,
+  .script-schedule {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    font-size: var(--fs-xs);
+    color: var(--ink-2);
+  }
+
+  .script-cwd .icon,
+  .script-schedule .icon {
+    flex: none;
+    color: var(--ink-3);
+  }
+
+  .script-cwd span,
+  .script-schedule code {
+    font-family: var(--font-mono);
+    overflow-wrap: anywhere;
+  }
+
+  /* A schedule that can never fire is the page's worst state: the operator
+     believes this is automated and it is not. It gets the failure color and the
+     alert glyph, in the row where they are already looking for the schedule. */
+  .script-schedule.bad,
+  .script-schedule .bad {
+    color: var(--down);
+  }
+
+  .script-schedule.bad .icon {
+    color: var(--down);
+  }
+
+  .script-foot {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    padding-top: var(--sp-3);
+    border-top: 1px solid var(--line-1);
+  }
+
+  /* =====================================================================
+     Run output
+     ===================================================================== */
+
+  /* Terminal output, in a box that scrolls rather than one that grows: 16 KB of
+     restic chatter must not push the Close button off the screen. */
+  .run-output {
+    max-height: min(50vh, 420px);
+    margin: 0;
+    padding: var(--sp-3);
+    overflow: auto;
+    background: var(--bg-0);
+    border: 1px solid var(--line-1);
+    border-radius: var(--r-s);
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    line-height: 1.55;
+    color: var(--ink-1);
+    /* pre-wrap, not pre: a long line wraps instead of forcing a second scroll
+       axis onto text someone is trying to read. */
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    tab-size: 4;
+  }
+
+  .config-example {
+    margin: var(--sp-3) 0 0;
+    padding: var(--sp-3);
+    overflow-x: auto;
+    background: var(--bg-0);
+    border: 1px solid var(--line-1);
+    border-radius: var(--r-s);
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    line-height: 1.6;
+    color: var(--ink-2);
+  }
+
+  /* =====================================================================
+     Controls
+     ===================================================================== */
+
+  /* The active history filter. Pressing it clears the filter, so the × is the
+     whole control rather than decoration next to it. */
+  .filter-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-1);
+    padding: 2px var(--sp-2);
+    background: var(--acc-soft);
+    border: 1px solid var(--acc-line);
+    border-radius: var(--r-full);
+    color: var(--ink-1);
+    font-size: var(--fs-xs);
+    cursor: pointer;
+  }
+
+  .filter-chip:hover {
+    border-color: var(--acc);
+  }
+
+  @media (max-width: 640px) {
+    .script-foot {
+      flex-wrap: wrap;
+    }
+  }
+}

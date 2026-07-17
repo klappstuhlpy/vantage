@@ -404,15 +404,32 @@ pub async fn run_check(state: &AppState) {
 /// check runs shortly after start-up (so the badge appears without waiting a
 /// full interval). No-op when Docker is unavailable or checks are disabled
 /// (`update_check_interval_hours = 0`).
-pub fn spawn_update_checker(state: AppState) {
-    let hours = state
+/// The update-check interval in hours `config.json` (or the default) asks for.
+pub fn config_interval_hours(state: &AppState) -> u64 {
+    state
         .config
         .update_check_interval_hours
-        .unwrap_or(DEFAULT_INTERVAL_HOURS);
-    if hours == 0 {
-        tracing::info!("container image update checks disabled (update_check_interval_hours = 0)");
-        return;
-    }
+        .unwrap_or(DEFAULT_INTERVAL_HOURS)
+}
+
+/// The *effective* update-check interval in hours (0 = disabled): a dashboard
+/// override wins over `config.json`, which wins over the built-in default.
+pub fn check_interval_hours(state: &AppState) -> u64 {
+    state
+        .settings
+        .get()
+        .update_check_interval_hours
+        .or(state.config.update_check_interval_hours)
+        .unwrap_or(DEFAULT_INTERVAL_HOURS)
+}
+
+/// How long to idle before re-checking while update checks are disabled, so the
+/// settings page can turn them on without a restart.
+const DISABLED_RECHECK_SECS: u64 = 3600;
+
+pub fn spawn_update_checker(state: AppState) {
+    // Docker absence is decided at boot and cannot change at runtime, so it is
+    // still an early return. The interval, by contrast, is read live each loop.
     if state.docker().is_none() {
         return;
     }
@@ -420,6 +437,11 @@ pub fn spawn_update_checker(state: AppState) {
         // Small initial delay so this doesn't pile onto everything else at boot.
         tokio::time::sleep(Duration::from_secs(45)).await;
         loop {
+            let hours = check_interval_hours(&state);
+            if hours == 0 {
+                tokio::time::sleep(Duration::from_secs(DISABLED_RECHECK_SECS)).await;
+                continue;
+            }
             run_check(&state).await;
             tokio::time::sleep(Duration::from_secs(hours * 3600)).await;
         }

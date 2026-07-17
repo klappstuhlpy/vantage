@@ -232,6 +232,12 @@ pub struct Config {
     /// comparison). Defaults to 12; set to 0 to disable. Requires Docker.
     #[serde(default)]
     pub update_check_interval_hours: Option<u64>,
+    /// How many days of audit entries to keep. Defaults to 90
+    /// (`audit::DEFAULT_RETENTION_DAYS`). A hard row cap applies on top, so this
+    /// is a promise about how far back you can look rather than an unbounded
+    /// grant — see `audit::prune`.
+    #[serde(default)]
+    pub audit_retention_days: Option<u32>,
     /// Multi-sink alert delivery (Discord webhook, ntfy, generic webhook, email).
     /// All sinks are optional; absent = no alerts.
     #[serde(default)]
@@ -259,6 +265,15 @@ pub struct Config {
     /// admin opens it read-only for the security analytics page.
     #[serde(default)]
     pub requests_db_path: Option<std::path::PathBuf>,
+    /// Directory holding the site's rolling log files (`today.log` and
+    /// `bad_requests.log`). When set, the log viewer can switch between
+    /// Vantage's own log and the site's; unset, it shows only Vantage's.
+    ///
+    /// Vantage runs as its own process and writes its own log, so it cannot
+    /// reach the site's without being told where they are — the same reason
+    /// `requests_db_path` exists.
+    #[serde(default)]
+    pub site_logs_path: Option<std::path::PathBuf>,
     /// ClamAV daemon address for the file sanitizer (e.g. `"127.0.0.1:3310"`).
     /// Unset = ClamAV scan disabled.
     #[serde(default)]
@@ -609,6 +624,7 @@ impl Config {
             domains: Vec::new(),
             production: false,
             update_check_interval_hours: None,
+            audit_retention_days: None,
             alerts: AlertsConfig::default(),
             backup: BackupConfig::default(),
             proxy: ProxyConfig::default(),
@@ -616,6 +632,7 @@ impl Config {
             sshd_auth_log_path: None,
             geoip_path: None,
             requests_db_path: None,
+            site_logs_path: None,
             clamav_addr: None,
             virustotal_api_key: None,
             secret_key: SecretKey::random().context("could not generate a signing key")?,
@@ -647,6 +664,7 @@ impl Config {
             domains: Vec::new(),
             production: false,
             update_check_interval_hours: None,
+            audit_retention_days: None,
             alerts: AlertsConfig::default(),
             backup: BackupConfig::default(),
             proxy: ProxyConfig::default(),
@@ -654,6 +672,7 @@ impl Config {
             sshd_auth_log_path: None,
             geoip_path: None,
             requests_db_path: None,
+            site_logs_path: None,
             clamav_addr: None,
             virustotal_api_key: None,
             secret_key: SecretKey::random().expect("generate test key"),

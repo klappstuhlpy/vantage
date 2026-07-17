@@ -1,16 +1,212 @@
 {% extends "layout.html" %}
-{% block title %}SSH Keys | Vantage{% endblock %}
+
+{% block title %}SSH | Vantage{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="/static/css/pages/ssh.css">
+{% endblock %}
+
 {% block content %}
-<div class="admin-page-header">
-    <div>
-        <h1>SSH Key Management</h1>
-        <p>Manage authorized SSH keys, access tokens, and sync to host authorized_keys.</p>
+<div class="page-head">
+    <div class="page-head-text">
+        <h1>SSH</h1>
+        <p class="page-sub">Which keys may log into this host, and which tokens automation may use.</p>
+    </div>
+    <div class="page-actions">
+        <a class="btn quiet" href="/ssh/audit">
+            <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#history"/></svg>
+            Audit log
+        </a>
+        <a class="btn quiet" href="/ssh/export/authorized_keys" download="authorized_keys">
+            <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#download"/></svg>
+            Export
+        </a>
+        <button class="btn" id="add-key-btn" type="button">
+            <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#plus"/></svg>
+            Add key
+        </button>
     </div>
 </div>
 
-<div id="ssh-app">
-    <p>Loading SSH key management...</p>
-</div>
+<noscript>
+    <div class="callout warn">
+        <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#triangle-alert"/></svg>
+        <div class="callout-body">This page needs JavaScript to list your keys.</div>
+    </div>
+</noscript>
 
-<script src="/static/js/ssh.js"></script>
+<section>
+    <div class="stat-grid" id="tiles"></div>
+</section>
+
+<section>
+    <div class="section-head">
+        <h2>Authorized keys</h2>
+        <span class="count-badge" id="key-count">0</span>
+    </div>
+    <div class="card">
+        <div class="card-body flush">
+            <div class="table-wrap">
+                <table class="table" id="keys">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Fingerprint</th>
+                            <th>Host user</th>
+                            <th>Last used</th>
+                            <th>State</th>
+                            <th class="actions"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="keys-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section>
+    <div class="section-head">
+        <h2>Access tokens</h2>
+        <span class="count-badge" id="token-count">0</span>
+        <div class="spacer"></div>
+        <button class="btn sm quiet" id="issue-token-btn" type="button">
+            <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#plus"/></svg>
+            Issue token
+        </button>
+    </div>
+    <div class="card">
+        <div class="card-body flush">
+            <div class="table-wrap">
+                <table class="table" id="tokens">
+                    <thead>
+                        <tr>
+                            <th>Label</th>
+                            <th>Scopes</th>
+                            <th>Expires</th>
+                            <th>Last used</th>
+                            <th>State</th>
+                            <th class="actions"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="tokens-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</section>
+
+{# ─── Add key ─────────────────────────────────────────────────────── #}
+<dialog class="modal" id="key-editor">
+    <form id="key-form" autocomplete="off">
+        <div class="modal-header">
+            <span class="modal-title">Add an SSH key</span>
+            <button class="btn sm ghost icon-only" type="button" data-close aria-label="Close">
+                <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#x"/></svg>
+            </button>
+        </div>
+
+        <div class="modal-body">
+            <div class="field">
+                <label for="k-name">Name</label>
+                <input class="input" id="k-name" required maxlength="100" data-autofocus placeholder="Ben's laptop">
+                <span class="field-hint">How you'll recognise this key here. Not sent to the host.</span>
+            </div>
+
+            <div class="field">
+                <label for="k-key">Public key</label>
+                <textarea class="textarea mono" id="k-key" rows="4" required spellcheck="false"
+                          placeholder="ssh-ed25519 AAAAC3Nza… ben@laptop"></textarea>
+                {#
+                    The trailing comment is not decoration: add_key derives the
+                    host user from it ('ben@laptop' → 'ben'), and that is what
+                    decides which authorized_keys file the key lands in. A key
+                    pasted without one is rejected — so say so before they paste,
+                    not after.
+                #}
+                <span class="field-hint">
+                    One line from your <code>.pub</code> file. It <strong>must</strong> keep its trailing
+                    <code>user@host</code> comment — the <code>user</code> part decides which account on
+                    this host the key can log in as.
+                </span>
+                <span class="field-error" id="k-error" hidden></span>
+            </div>
+        </div>
+
+        <div class="modal-footer">
+            <button class="btn quiet" type="button" data-close>Cancel</button>
+            <button class="btn" type="submit" id="key-save">Add key</button>
+        </div>
+    </form>
+</dialog>
+
+{# ─── Issue token ─────────────────────────────────────────────────── #}
+<dialog class="modal" id="token-editor">
+    <form id="token-form" autocomplete="off">
+        <div class="modal-header">
+            <span class="modal-title">Issue an access token</span>
+            <button class="btn sm ghost icon-only" type="button" data-close aria-label="Close">
+                <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#x"/></svg>
+            </button>
+        </div>
+
+        <div class="modal-body">
+            <div class="field">
+                <label for="t-label">Label</label>
+                <input class="input" id="t-label" required data-autofocus placeholder="CI deploy">
+                <span class="field-hint">What this token is for, so you can revoke the right one later.</span>
+            </div>
+
+            <div class="field">
+                <label for="t-scopes">Scopes <span class="label-optional">(optional)</span></label>
+                <input class="input mono" id="t-scopes" placeholder="docker,metrics">
+                <span class="field-hint">Comma-separated. Leave blank for full access.</span>
+            </div>
+
+            <div class="field">
+                <label for="t-expiry">Expires in</label>
+                <select class="select" id="t-expiry">
+                    <option value="24">24 hours</option>
+                    <option value="168" selected>7 days</option>
+                    <option value="720">30 days</option>
+                    <option value="8760">1 year</option>
+                    <option value="0">Never</option>
+                </select>
+                <span class="field-hint">A token that expires is one you cannot forget about.</span>
+            </div>
+        </div>
+
+        <div class="modal-footer">
+            <button class="btn quiet" type="button" data-close>Cancel</button>
+            <button class="btn" type="submit" id="token-save">Issue token</button>
+        </div>
+    </form>
+</dialog>
+
+{# ─── The one-time token reveal ───────────────────────────────────── #}
+<dialog class="modal" id="token-reveal">
+    <div class="modal-header">
+        <span class="modal-title">Copy your token now</span>
+    </div>
+    <div class="modal-body">
+        <p class="modal-desc">
+            Vantage stores only a hash of this token, so it cannot be shown again. If you lose it,
+            revoke it and issue another.
+        </p>
+        <div class="token-box">
+            <code class="token-value" id="token-value"></code>
+            <button class="btn sm" type="button" id="token-copy" data-autofocus>
+                <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#copy"/></svg>
+                Copy
+            </button>
+        </div>
+    </div>
+    <div class="modal-footer">
+        <button class="btn" type="button" data-close>Done</button>
+    </div>
+</dialog>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/js/pages/ssh.js"></script>
 {% endblock %}

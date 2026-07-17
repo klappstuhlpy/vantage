@@ -1,21 +1,23 @@
 [package]
 name = "vantage"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "AGPL-v3"
 description = "Vantage — a security-first VPS/homelab control plane. Manage your server through a terminal-aesthetic web UI, backed by CLI."
 
-# Consumes the shared klappstuhl_me-shared kernel (kls-web-core, kls-ui, kls-agent)
-# as tag-pinned git dependencies, alongside the Percy dashboard and the main site.
+# Consumes the shared klappstuhl_me-shared kernel (kls-web-core, kls-agent) as
+# tag-pinned git dependencies, alongside the Percy dashboard and the main site.
+# `kls-ui` is deliberately NOT a dependency: Vantage ships its own design system
+# in `static/` (see static/README.md). The site and the Percy dashboard still use
+# kls-ui; Vantage diverged so it can be a standalone product with its own look.
 [dependencies]
-kls-ui = { git = "ssh://git@github.com/klappstuhlpy/klappstuhl_me-shared", tag = "v0.1.11" }
 kls-web-core = { git = "ssh://git@github.com/klappstuhlpy/klappstuhl_me-shared", tag = "v0.1.11" }
 kls-agent = { git = "ssh://git@github.com/klappstuhlpy/klappstuhl_me-shared", tag = "v0.1.11" }
 anyhow = "1.0.80"
 argon2 = { version = "0.5.3", features = ["std"] }
-# Compile-time HTML templates for admin pages (own `templates/` dir — Askama
-# templates can't be shared cross-crate, so each app keeps its own; only CSS/JS
-# tokens are shared via kls-ui).
+# Compile-time HTML templates for admin pages (own `templates/` dir). Askama
+# compile-checks every template against its context struct, so a bad field or a
+# stale block name is a build error rather than a blank page at runtime.
 askama = { version = "0.12.1", features = ["with-axum"] }
 askama_axum = "0.4.0"
 async-trait = "0.1.77"
@@ -47,6 +49,11 @@ maxminddb = "0.24"
 # name rusqlite::Connection. Feature unification keeps it one build.
 # In-process per-IP login lockout (bounded, LRU) — the site's `lockout.rs` pattern.
 quick_cache = "0.4.1"
+# QR encoding for the TOTP enrollment provisioning URI. `default-features = false`
+# drops the `image` renderer (and the whole `image` crate with it): only the
+# encoder is used, and the account page draws the module matrix itself as SVG, so
+# the QR inherits the current theme instead of arriving as a fixed black bitmap.
+qrcode = { version = "0.14", default-features = false }
 rusqlite = { version = "0.31.0", features = ["bundled", "time"] }
 rpassword = "7.3.1"
 # The health monitor's probe client (http/keyword checks) + the SSL-expiry probe.

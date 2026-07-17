@@ -1,0 +1,97 @@
+/* ==========================================================================
+   Alerts page — sinks and their delivery log.
+   ========================================================================== */
+
+@layer pages {
+  .sink-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: var(--sp-3);
+  }
+
+  .sink {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+    padding: var(--sp-4);
+    background: var(--bg-1);
+    border: 1px solid var(--line-1);
+    border-radius: var(--r-m);
+  }
+
+  /* An unconfigured sink is not an error and must not look like one. It is
+     dimmed rather than tinted: nothing is wrong, there is simply nothing here
+     yet, and the card's job is to say what would make it exist. */
+  .sink.absent {
+    background: var(--bg-0);
+    border-style: dashed;
+  }
+
+  .sink-head {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+  }
+
+  .sink-name {
+    font-weight: 600;
+  }
+
+  .sink-head .icon {
+    color: var(--ink-3);
+  }
+
+  .sink-body {
+    flex: 1;
+    min-width: 0;
+    font-size: var(--fs-sm);
+    color: var(--ink-2);
+  }
+
+  /* The masked destination. Mono because it is an address, and `anywhere`
+     because a host can be long and this must never widen the grid column. */
+  .sink-target {
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    color: var(--ink-1);
+    overflow-wrap: anywhere;
+  }
+
+  .sink-detail {
+    font-size: var(--fs-xs);
+    color: var(--ink-3);
+    overflow-wrap: anywhere;
+  }
+
+  .sink-foot {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    padding-top: var(--sp-3);
+    border-top: 1px solid var(--line-1);
+  }
+
+  .sink.absent .sink-foot {
+    border-top-color: var(--line-2);
+  }
+
+  /* =====================================================================
+     Delivery log
+     ===================================================================== */
+
+  /* A failure reason, under the row it explains. Not a tooltip: the reason
+     ("the endpoint answered 401") is the entire value of the row, and hiding
+     it behind a hover would put the one useful fact out of reach on a phone. */
+  .delivery-error {
+    margin-top: 2px;
+    font-size: var(--fs-xs);
+    color: var(--down);
+    overflow-wrap: anywhere;
+  }
+
+  .delivery-title {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+  }
+}

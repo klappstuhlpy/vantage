@@ -9,16 +9,15 @@
 //! Restore is deliberately not offered in-app (replacing the live DB under
 //! WAL is unsafe); download and swap `admin.db` with the server stopped.
 
-use crate::{backup, session::Account, AppState};
+use crate::{audit, backup, session::Account, AppState};
 use askama::Template;
 use axum::{
-    extract::{ConnectInfo, Path, State},
+    extract::{Path, State},
     http::{header, StatusCode},
     response::{IntoResponse, Json, Redirect, Response},
     routing::{get, post},
     Router,
 };
-use std::net::SocketAddr;
 
 /// One backup file as shown in the dashboard table. The off-site state is
 /// pre-rendered to a label + CSS class so the template stays declarative.
@@ -94,10 +93,16 @@ async fn page(State(state): State<AppState>, account: Account) -> Result<Backups
     let rows: Vec<BackupRow> = backups
         .iter()
         .map(|b| {
+            // The class is a design-system pill tone, not an ad-hoc name: these
+            // used to be "yes"/"no"/"unknown", which matched no stylesheet rule
+            // and rendered as unstyled text. "local only" is a warning rather
+            // than a neutral state — an off-site target is configured and this
+            // snapshot is not on it, which is precisely the case where a lost
+            // host loses the backup too.
             let (off_site_label, off_site_class) = match &off_site_names {
-                Some(set) if set.contains(&b.name) => ("✓ stored", "yes"),
-                Some(_) => ("local only", "no"),
-                None => ("—", "unknown"),
+                Some(set) if set.contains(&b.name) => ("stored", "ok"),
+                Some(_) => ("local only", "warn"),
+                None => ("not configured", "idle"),
             };
             BackupRow {
                 name: b.name.clone(),
@@ -137,11 +142,7 @@ async fn page(State(state): State<AppState>, account: Account) -> Result<Backups
     })
 }
 
-async fn create_now(
-    State(state): State<AppState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
-    account: Account,
-) -> Response {
+async fn create_now(State(state): State<AppState>, account: Account) -> Response {
     if !account.is_admin() {
         return StatusCode::FORBIDDEN.into_response();
     }
@@ -155,12 +156,10 @@ async fn create_now(
             // unconfigured); the request is never blocked on network I/O.
             backup::spawn_remote_upload(state.clone(), path);
             backup::prune(&state, backup::keep_count(&state));
-            tracing::info!(
-                action = "backup.create",
-                actor = %account.name,
-                target = %name,
-                ip = %peer.ip()
-            );
+            audit::event("backup.create", &account)
+                .target(&name)
+                .record(&state.db)
+                .await;
         }
         Err(e) => tracing::warn!(error = %e, "manual backup failed"),
     }
@@ -170,12 +169,7 @@ async fn create_now(
 /// Uploads one existing backup to the off-site store synchronously and returns
 /// JSON feedback. Unlike the automatic background push, this gives the operator
 /// immediate feedback (useful to validate credentials after configuring).
-async fn upload_now(
-    State(state): State<AppState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
-    account: Account,
-    Path(name): Path<String>,
-) -> Response {
+async fn upload_now(State(state): State<AppState>, account: Account, Path(name): Path<String>) -> Response {
     if !account.is_admin() {
         return StatusCode::FORBIDDEN.into_response();
     }
@@ -191,12 +185,11 @@ async fn upload_now(
     };
     match backup::upload_to_remote(&state, &path).await {
         Ok(Some(key)) => {
-            tracing::info!(
-                action = "backup.upload",
-                actor = %account.name,
-                target = %name,
-                ip = %peer.ip()
-            );
+            audit::event("backup.upload", &account)
+                .target(&name)
+                .detail(serde_json::json!({ "key": key }))
+                .record(&state.db)
+                .await;
             Json(serde_json::json!({
                 "status": "success",
                 "message": format!("Uploaded off-site as {key}.")
@@ -242,23 +235,16 @@ async fn download(account: Account, State(state): State<AppState>, Path(name): P
     }
 }
 
-async fn delete_backup(
-    State(state): State<AppState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
-    account: Account,
-    Path(name): Path<String>,
-) -> Response {
+async fn delete_backup(State(state): State<AppState>, account: Account, Path(name): Path<String>) -> Response {
     if !account.is_admin() {
         return StatusCode::FORBIDDEN.into_response();
     }
     if let Some(path) = backup::resolve(&state, &name) {
         if std::fs::remove_file(&path).is_ok() {
-            tracing::info!(
-                action = "backup.delete",
-                actor = %account.name,
-                target = %name,
-                ip = %peer.ip()
-            );
+            audit::event("backup.delete", &account)
+                .target(&name)
+                .record(&state.db)
+                .await;
         }
     }
     Redirect::to("/backups").into_response()

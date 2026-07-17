@@ -2,10 +2,12 @@
 //!
 //! Stood up in-tree as a workspace binary (ADMIN_SEPARATION_PLAN Phase 4) before
 //! it graduates to its own repo (Phase 6). It links only the shared kernel —
-//! [`kls_web_core`] (async SQLite + crypto + migrations), [`kls_ui`] (the design
-//! system at `/kls/*`), and [`kls_agent`] (the typed privileged-host-op boundary)
-//! — with **no dependency on the `klappstuhl_me` app crate**: its own DB, config,
-//! auth and release cadence (locked decision 9, standalone-first).
+//! [`kls_web_core`] (async SQLite + crypto + migrations) and [`kls_agent`] (the
+//! typed privileged-host-op boundary) — with **no dependency on the
+//! `klappstuhl_me` app crate**: its own DB, config, auth and release cadence
+//! (locked decision 9, standalone-first). The frontend is likewise its own: the
+//! `kls-ui` design system was dropped in the frontend rewrite, so `static/`
+//! carries the whole UI with zero runtime egress.
 //!
 //! This is the skeleton. The admin **feature slices** (metrics, docker, firewall,
 //! health, proxy, backup, ssh, secrets, …) move in one at a time in the following
@@ -14,7 +16,7 @@
 //! Structure so far:
 //! - [`config`] — `config.json`, including the fail-closed [`config::Exposure`]
 //!   policy (§7.1) evaluated at startup,
-//! - [`migrations`] — the embedded `admin.db` schema, applied via the shared runner,
+//! - [`migrations`] — the embedded `db` schema, applied via the shared runner,
 //! - the entry point below: the `admin` bootstrap CLI + the multi-listener server.
 
 use std::{
@@ -28,6 +30,7 @@ use argon2::{
     password_hash::{rand_core::OsRng, SaltString},
     Argon2, PasswordHash, PasswordHasher, PasswordVerifier,
 };
+use askama::Template;
 use axum::{
     extract::{ConnectInfo, State},
     http::{header::SET_COOKIE, HeaderValue, StatusCode},
@@ -44,7 +47,9 @@ use crate::config::{Config, GuardProfile, Listener};
 use crate::session::Account;
 use crate::ws::LiveEvent;
 
+mod account;
 mod alerts;
+mod audit;
 mod backup;
 mod cached;
 mod certs;
@@ -53,6 +58,7 @@ mod config;
 mod cron;
 mod dashboard;
 mod dbadmin;
+mod diffutil;
 mod docker;
 mod firewall;
 mod geoip;
@@ -63,10 +69,13 @@ mod logs;
 mod metrics;
 mod migrations;
 mod proxy;
+mod revert;
+mod safemode;
 mod sanitizer;
 mod secrets;
 mod security;
 mod session;
+mod settings;
 mod spotlight;
 mod ssh;
 mod totp;
@@ -118,6 +127,21 @@ struct AppState {
     /// A valid Argon2 hash of a fixed string, verified against when the username
     /// is unknown so login timing does not reveal account existence.
     pub(crate) incorrect_password_hash: Arc<String>,
+    /// Global safe mode (`safemode`): the live "freeze all host changes" flag.
+    /// An atomic, not a DB read, because the safe-mode middleware consults it on
+    /// every request; the `storage` row is its durable shadow, loaded once at
+    /// startup and rewritten on toggle.
+    pub(crate) safe_mode: Arc<std::sync::atomic::AtomicBool>,
+    /// Runtime-adjustable operational settings (`settings`): the dashboard-editable
+    /// overlay on `config.json`'s retention/cadence knobs. An in-memory snapshot,
+    /// not a DB read, because background loops consult it every tick; the
+    /// `storage` rows are its durable shadow, loaded once at startup and
+    /// rewritten on save.
+    pub(crate) settings: Arc<settings::Settings>,
+    /// In-flight revert timers keyed by domain (`"firewall"`, `"proxy"`). An
+    /// arming apply parks a rollback here; a background task fires it unless a
+    /// confirm request removes it first (§11.1).
+    pub(crate) reverts: revert::Registry,
 }
 
 impl AppState {
@@ -159,37 +183,107 @@ impl AppState {
             || self.config.alerts.email.is_some()
     }
 
-    /// Fans an alert out to every configured sink. The payload uses the Discord
-    /// webhook JSON shape; a neutral notification is derived for non-Discord sinks.
+    /// Fans an alert out to every configured, enabled sink. The payload uses the
+    /// Discord webhook JSON shape; a neutral notification is derived for
+    /// non-Discord sinks.
+    ///
+    /// Fire-and-forget, as every call site expects — an alert must never be able
+    /// to slow down or fail the thing it is reporting on. The outcome is not
+    /// discarded any more, though: [`AppState::deliver_alert`] writes each
+    /// attempt to the delivery log, which is the only reason the Alerts page can
+    /// answer "did it actually go out?".
     pub(crate) fn send_alert(&self, value: serde_json::Value) {
-        let cfg = &self.config.alerts;
-        if let Some(url) = cfg.discord_webhook_url.clone() {
-            let client = self.client.clone();
-            let v = value.clone();
-            tokio::spawn(async move {
-                let _ = client.post(&url).json(&v).send().await;
-            });
-        }
-        let note = alerts::AlertNotification::from_discord_value(&value);
-        if let Some(url) = cfg.ntfy_url.clone() {
-            let client = self.client.clone();
-            let n = note.clone();
-            tokio::spawn(async move { alerts::send_ntfy(&client, &url, &n).await });
-        }
-        if let Some(url) = cfg.webhook_url.clone() {
-            let client = self.client.clone();
-            let n = note.clone();
-            tokio::spawn(async move { alerts::send_webhook(&client, &url, &n).await });
-        }
-        if let Some(email_cfg) = cfg.email.clone() {
-            let n = note.clone();
-            tokio::spawn(async move {
-                if let Err(e) = alerts::send_email(&email_cfg, &n).await {
-                    tracing::warn!(error = %e, "email alert delivery failed");
-                }
-            });
-        }
+        let state = self.clone();
+        tokio::spawn(async move {
+            state.deliver_alert(&value, None, false).await;
+        });
     }
+
+    /// Delivers to every configured sink and records each attempt.
+    ///
+    /// `only` restricts delivery to a single sink and **bypasses its enabled
+    /// toggle** — that is the Test button, where you have explicitly pointed at
+    /// one sink and want to know whether its configuration works, which is a
+    /// different question from whether it is currently switched on.
+    ///
+    /// Returns one entry per sink attempted, so the test route can report the
+    /// reason rather than a bare failure.
+    pub(crate) async fn deliver_alert(
+        &self,
+        value: &serde_json::Value,
+        only: Option<&str>,
+        test: bool,
+    ) -> Vec<(&'static str, Result<(), String>)> {
+        let cfg = &self.config.alerts;
+        let note = alerts::AlertNotification::from_discord_value(value);
+
+        // Resolved up front so the sends below can run concurrently: a sink that
+        // is slow (SMTP against a distant relay) must not hold up one that isn't.
+        let mut wanted = Vec::new();
+        for sink in alerts::SINKS {
+            let configured = match sink {
+                "discord" => cfg.discord_webhook_url.is_some(),
+                "ntfy" => cfg.ntfy_url.is_some(),
+                "webhook" => cfg.webhook_url.is_some(),
+                "email" => cfg.email.is_some(),
+                _ => false,
+            };
+            let want = match only {
+                Some(target) => target == sink,
+                None => alerts::sink_enabled(&self.db, sink).await,
+            };
+            if configured && want {
+                wanted.push(sink);
+            }
+        }
+
+        let outcomes =
+            futures_util::future::join_all(wanted.into_iter().map(|sink| attempt_sink(self, &note, value, sink))).await;
+
+        for (sink, result) in &outcomes {
+            if let Err(reason) = result {
+                tracing::warn!(sink, error = %reason, "alert delivery failed");
+            }
+            alerts::record_delivery(&self.db, sink, &note, result, test).await;
+        }
+        outcomes
+    }
+}
+
+/// Hands one alert to one sink.
+///
+/// A free function rather than a closure inside [`AppState::deliver_alert`]
+/// because `join_all` needs one future type: an `async` closure would produce a
+/// distinct opaque type per call site *and* would have to move `note` into the
+/// first future it built, leaving nothing for the second.
+async fn attempt_sink(
+    state: &AppState,
+    note: &alerts::AlertNotification,
+    value: &serde_json::Value,
+    sink: &'static str,
+) -> (&'static str, Result<(), String>) {
+    let cfg = &state.config.alerts;
+    // Every arm is reached only for a sink `deliver_alert` already confirmed is
+    // configured, so the `unwrap_or_default` fallbacks are unreachable rather
+    // than lenient — an empty URL would fail the send and be logged as such.
+    let result = match sink {
+        "discord" => {
+            alerts::send_discord(
+                &state.client,
+                cfg.discord_webhook_url.as_deref().unwrap_or_default(),
+                value,
+            )
+            .await
+        }
+        "ntfy" => alerts::send_ntfy(&state.client, cfg.ntfy_url.as_deref().unwrap_or_default(), note).await,
+        "webhook" => alerts::send_webhook(&state.client, cfg.webhook_url.as_deref().unwrap_or_default(), note).await,
+        "email" => match &cfg.email {
+            Some(email) => alerts::send_email(email, note).await.map_err(|e| e.to_string()),
+            None => Err("no email sink configured".to_string()),
+        },
+        _ => Err("unknown sink".to_string()),
+    };
+    (sink, result)
 }
 
 /// `account.flags` bit 0 — the admin flag, wire-compatible with the site's
@@ -328,6 +422,9 @@ fn spawn_background(state: &AppState) {
     // keys matching successful publickey auth events. No-op when
     // sshd_auth_log_path is not configured.
     ssh::spawn_auth_log_watcher(state.clone());
+    // Audit pruner: drops entries past the retention window (and enforces the
+    // hard row cap) every six hours.
+    audit::spawn_pruner(state.clone());
 }
 
 async fn serve_listener(listener: Listener, router: Router) -> anyhow::Result<()> {
@@ -397,6 +494,13 @@ async fn build_state_with(config: Config, path: &Path) -> anyhow::Result<AppStat
     // gets a `_meta.lagged` notice and falls back to polling.
     let (live_tx, _) = broadcast::channel(64);
 
+    // Global safe mode: start the live atomic where the operator last left it.
+    let safe_mode = Arc::new(std::sync::atomic::AtomicBool::new(safemode::load_initial(&db).await));
+
+    // Runtime settings overlay: start the in-memory snapshot from the durable
+    // overrides, so a dashboard-adjusted retention/cadence survives a restart.
+    let settings = Arc::new(settings::Settings::load_initial(&db).await);
+
     // GeoIP database for the security dashboard (loads the mmdb file if configured).
     let geoip = geoip::GeoIp::open(config.geoip_path.as_deref());
 
@@ -453,6 +557,9 @@ async fn build_state_with(config: Config, path: &Path) -> anyhow::Result<AppStat
         requests,
         cloudflare,
         incorrect_password_hash: Arc::new(incorrect_password_hash),
+        safe_mode,
+        settings,
+        reverts: revert::Registry::new(),
     })
 }
 
@@ -465,6 +572,10 @@ fn build_router(state: AppState) -> Router {
         .route("/login/2fa", get(login_2fa_page).post(login_2fa_submit))
         .route("/logout", get(logout))
         .route("/health", get(health))
+        .merge(account::routes::routes())
+        .merge(alerts::routes::routes())
+        .merge(audit::routes::routes())
+        .merge(cron::routes::routes())
         // Admin feature slices (grow as each moves in — Phase 4 Steps C+).
         .merge(logs::routes())
         .merge(dbadmin::routes::routes())
@@ -480,14 +591,25 @@ fn build_router(state: AppState) -> Router {
         .merge(proxy::routes::routes())
         .merge(spotlight::routes())
         .merge(security::routes())
+        .merge(safemode::routes())
+        .merge(settings::routes())
         // Admin API endpoints (token-scoped in the monolith; session-gated here).
         .route("/api/updates", get(api_updates))
         // The live-update WebSocket hub; slices publish into it as they arrive.
         .merge(ws::routes())
-        .nest("/kls", kls_ui::routes())
-        // Vantage's own assets (admin CSS/JS/img), shipped as a `static/` dir
-        // next to the binary; the shared design system lives at /kls.
+        // Vantage's own frontend: design system, page CSS/JS, vendored fonts,
+        // icon sprite and chart libs. Shipped as a `static/` dir next to the
+        // binary. Vantage owns its design system outright — nothing is fetched
+        // from a CDN or a shared crate at runtime, so a VPN-only box with no
+        // egress renders identically to one with internet access.
         .nest_service("/static", tower_http::services::ServeDir::new("static"))
+        // Global safe mode: refuse destructive host mutations while engaged, on
+        // the outermost layer so a frozen box turns them away before any handler
+        // (or the DB) sees them. Reads the atomic only — no per-request DB hit.
+        .layer(axum::middleware::from_fn_with_state(
+            state.safe_mode.clone(),
+            safemode::guard,
+        ))
         // Parse the Cookie header into a `Vec<Cookie>` extension the `Account`
         // extractor reads. Must wrap the routes (added last = outermost).
         .layer(axum::middleware::from_fn(parse_cookies))
@@ -527,22 +649,44 @@ async fn login_page(account: Option<Account>) -> Response {
     render_login(None).into_response()
 }
 
-/// Renders the minimal login form (no inline JS, so a strict CSP holds later).
+#[derive(Template)]
+#[template(path = "login.html")]
+struct LoginTemplate {
+    error: Option<String>,
+}
+
+#[derive(Template)]
+#[template(path = "login_2fa.html")]
+struct Login2faTemplate {
+    error: Option<String>,
+}
+
+/// Renders the login form.
+///
+/// This was a `format!` of a hand-written HTML string that linked
+/// `/kls/base.css` — a stylesheet that no longer exists, so the page had been
+/// rendering unstyled. It also hand-escaped its own error message, which is a
+/// bug waiting to happen every time someone adds a second interpolation.
+/// Askama escapes `{{ }}` for us and the template is checked at compile time.
 fn render_login(error: Option<&str>) -> Html<String> {
-    let error_html = error
-        .map(|e| format!("<p style=\"color:#d97757\">{}</p>", html_escape(e)))
-        .unwrap_or_default();
-    Html(format!(
-        "<!doctype html><meta charset=utf-8><link rel=stylesheet href=/kls/base.css>\
-         <title>Vantage — sign in</title>\
-         <main style=\"max-width:22rem;margin:5rem auto;font-family:monospace\">\
-         <h1>Vantage</h1>{error_html}\
-         <form method=post action=/login>\
-         <p><label>username<br><input name=username autocomplete=username autofocus></label></p>\
-         <p><label>password<br><input name=password type=password autocomplete=current-password></label></p>\
-         <p><button type=submit>Sign in</button></p>\
-         </form></main>"
-    ))
+    Html(
+        LoginTemplate {
+            error: error.map(str::to_owned),
+        }
+        .render()
+        .unwrap_or_else(|e| {
+            // A template that fails to render is a bug, not a runtime
+            // condition — but the login page is the one door into the app, so
+            // it degrades to something usable rather than a 500.
+            tracing::error!(error = %e, "login template failed to render");
+            "<!doctype html><title>Vantage</title><h1>Vantage</h1>\
+             <form method=post action=/login>\
+             <p><label>username <input name=username></label></p>\
+             <p><label>password <input name=password type=password></label></p>\
+             <button type=submit>Sign in</button></form>"
+                .to_owned()
+        }),
+    )
 }
 
 #[derive(serde::Deserialize)]
@@ -566,6 +710,7 @@ struct PendingTotp {
 async fn login_submit(
     State(state): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: axum::http::HeaderMap,
     Form(credentials): Form<Credentials>,
 ) -> Response {
     let ip = peer.ip();
@@ -584,6 +729,22 @@ async fn login_submit(
         .unwrap_or(state.incorrect_password_hash.as_str());
     if !verify_password(&credentials.password, hash) {
         lockout::register_failure(ip);
+        // The row an audit log exists for. `actor` is the username that was
+        // *typed*, which may name no account at all — that is the fact worth
+        // keeping, and it is why this is recorded here rather than after the
+        // constant-time check resolves it into an identity.
+        //
+        // Truncated because this is the one audit call on an unauthenticated
+        // path: the typed username is a stranger's input, and a table row is not
+        // the place to find out how long they made it. The write rate is bounded
+        // by the per-IP lockout above (five tries, then this line is never
+        // reached), and by the log's own row cap.
+        let typed: String = username.chars().take(64).collect();
+        audit::system_event("account.login.failed", &typed)
+            .ip(ip)
+            .failed()
+            .record(&state.db)
+            .await;
         return (
             StatusCode::UNAUTHORIZED,
             render_login(Some("Incorrect username or password.")),
@@ -605,7 +766,7 @@ async fn login_submit(
         return with_cookie(Redirect::to("/login/2fa").into_response(), &cookie);
     }
 
-    complete_login(&state, account.id, ip).await
+    complete_login(&state, account.id, ip, &headers).await
 }
 
 /// The 2FA code page. Redirects to `/login` without a live pending challenge.
@@ -630,6 +791,7 @@ async fn login_2fa_submit(
     State(state): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     Extension(cookies): Extension<Vec<Cookie<'static>>>,
+    headers: axum::http::HeaderMap,
     Form(form): Form<TotpForm>,
 ) -> Response {
     let ip = peer.ip();
@@ -649,13 +811,28 @@ async fn login_2fa_submit(
         .and_then(|enc| totp::decrypt_secret(&state.config.secret_key, enc))
         .map(|secret| totp::verify(&secret, &form.code))
         .unwrap_or(false);
+    // A recovery code is accepted in the same field. Recovery codes exist for
+    // exactly this moment — the authenticator is lost, wiped or on a phone in
+    // another country — so demanding a separate form to use one would mean the
+    // codes only work when you least need them. They are 10 characters and a TOTP
+    // code is 6 digits, so there is no ambiguity about which was typed, and
+    // redemption is single-use.
+    let ok = ok || account::redeem_recovery_code(&state.db, account.id, &form.code).await;
     if !ok {
         lockout::register_failure(ip);
+        // Distinct from `account.login.failed`: this one got the password right.
+        // Someone holding valid credentials and failing only the second factor is
+        // the single most interesting row this log can contain.
+        audit::system_event("account.login.2fa_failed", &account.name)
+            .ip(ip)
+            .failed()
+            .record(&state.db)
+            .await;
         return (StatusCode::UNAUTHORIZED, render_2fa(Some("Invalid code."))).into_response();
     }
 
     // Success: complete the login, then also clear the challenge cookie.
-    let response = complete_login(&state, account.id, ip).await;
+    let response = complete_login(&state, account.id, ip, &headers).await;
     let clear = session::clear_cookie(state.config.twofa_cookie_name(), state.config.secure_cookies());
     with_cookie(response, &clear)
 }
@@ -671,7 +848,7 @@ fn valid_pending(state: &AppState, cookies: &[Cookie<'static>]) -> Option<Pendin
 
 /// Mints, persists and sets a session for `account_id`, clearing the IP's
 /// failure counter.
-async fn complete_login(state: &AppState, account_id: i64, ip: IpAddr) -> Response {
+async fn complete_login(state: &AppState, account_id: i64, ip: IpAddr, headers: &axum::http::HeaderMap) -> Response {
     let Ok(token) = Token::new(account_id) else {
         return internal_error("could not mint a session token");
     };
@@ -681,13 +858,67 @@ async fn complete_login(state: &AppState, account_id: i64, ip: IpAddr) -> Respon
     {
         return internal_error("could not persist the session");
     }
+    // Where this session came from, for the account page's session list. Written
+    // after the row exists and best-effort by design: a login must not fail
+    // because a User-Agent header was strange.
+    account::stamp_provenance(
+        &state.db,
+        &token.base64(),
+        Some(ip.to_string()),
+        account::routes::user_agent_of(headers),
+    )
+    .await;
     lockout::clear(ip);
+    // A `system_event` rather than `audit::event`: there is no extracted
+    // `Account` here — the session this login is creating is the first one — so
+    // the address is passed explicitly instead of riding along on one.
+    let name = session::account_by_id(&state.db, account_id)
+        .await
+        .map(|a| a.name)
+        .unwrap_or_else(|| format!("account:{account_id}"));
+    audit::system_event("account.login", &name)
+        .ip(ip)
+        .detail(serde_json::json!({ "user_agent": account::routes::user_agent_of(headers) }))
+        .record(&state.db)
+        .await;
+    alert_on_login(state, account_id, ip, headers).await;
     let cookie = session::session_cookie(
         state.config.session_cookie_name(),
         token.signed(&state.config.secret_key),
         state.config.secure_cookies(),
     );
     with_cookie(Redirect::to("/").into_response(), &cookie)
+}
+
+/// Raises an alert for a successful sign-in, when the operator has asked for one.
+///
+/// Off by default (see `alerts::alert_on_admin_login`) — on a homelab you sign in
+/// daily, and an alarm that fires on every ordinary action is one you train
+/// yourself to ignore, which is worse than not having it. The operators who want
+/// it are the ones who sign in twice a month and would like to know about the
+/// third time.
+async fn alert_on_login(state: &AppState, account_id: i64, ip: IpAddr, headers: &axum::http::HeaderMap) {
+    if !state.has_any_alert_sink() || !alerts::alert_on_admin_login(&state.db).await {
+        return;
+    }
+    let name = session::account_by_id(&state.db, account_id)
+        .await
+        .map(|a| a.name)
+        .unwrap_or_else(|| "unknown".to_string());
+    let agent = account::routes::user_agent_of(headers).unwrap_or_else(|| "unknown device".to_string());
+
+    state.send_alert(serde_json::json!({
+        "username": "Vantage",
+        "embeds": [{
+            "title": "Sign-in to Vantage",
+            "description": format!("**{name}** signed in from `{ip}`."),
+            "color": 0x3b82f6,
+            "fields": [
+                { "name": "Address", "value": ip.to_string(), "inline": true },
+                { "name": "Device", "value": agent, "inline": false },
+            ]
+        }]
+    }));
 }
 
 /// The short-lived challenge cookie carrying the signed [`PendingTotp`].
@@ -711,22 +942,22 @@ fn locked_response() -> Response {
         .into_response()
 }
 
-/// Renders the minimal TOTP-code form (no inline JS, for a strict CSP later).
+/// Renders the TOTP-code form. See [`render_login`] on why this is a template.
 fn render_2fa(error: Option<&str>) -> Html<String> {
-    let error_html = error
-        .map(|e| format!("<p style=\"color:#d97757\">{}</p>", html_escape(e)))
-        .unwrap_or_default();
-    Html(format!(
-        "<!doctype html><meta charset=utf-8><link rel=stylesheet href=/kls/base.css>\
-         <title>Vantage — two-factor</title>\
-         <main style=\"max-width:22rem;margin:5rem auto;font-family:monospace\">\
-         <h1>Two-factor</h1>{error_html}\
-         <form method=post action=/login/2fa>\
-         <p><label>authenticator code<br>\
-         <input name=code inputmode=numeric autocomplete=one-time-code autofocus></label></p>\
-         <p><button type=submit>Verify</button></p>\
-         </form></main>"
-    ))
+    Html(
+        Login2faTemplate {
+            error: error.map(str::to_owned),
+        }
+        .render()
+        .unwrap_or_else(|e| {
+            tracing::error!(error = %e, "2FA template failed to render");
+            "<!doctype html><title>Vantage</title><h1>Two-factor</h1>\
+             <form method=post action=/login/2fa>\
+             <p><label>code <input name=code inputmode=numeric></label></p>\
+             <button type=submit>Verify</button></form>"
+                .to_owned()
+        }),
+    )
 }
 
 /// Signs the current session out: deletes the DB row and clears the cookie.
@@ -752,14 +983,6 @@ fn with_cookie(mut response: Response, cookie: &Cookie<'static>) -> Response {
 fn internal_error(msg: &'static str) -> Response {
     tracing::error!("{msg}");
     (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "internal error\n").into_response()
-}
-
-/// Minimal HTML-escaping for the few user-controlled strings rendered inline.
-fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
 }
 
 /// Liveness probe that also confirms the kernel database is serving queries.
@@ -792,8 +1015,11 @@ async fn bootstrap_admin(state: &AppState) -> anyhow::Result<()> {
     if password != confirm {
         anyhow::bail!("passwords did not match");
     }
-    if password.len() < 8 {
-        anyhow::bail!("password must be at least 8 characters");
+    // The same policy the account page enforces — one rule, in one place. This
+    // used to be its own `< 8` check, so the CLI would happily bootstrap a
+    // password the web UI would then refuse to let you change it to.
+    if let Err(message) = account::validate_password(&password) {
+        anyhow::bail!("{message}");
     }
 
     create_admin_account(&state.db, &username, &password).await?;
@@ -818,7 +1044,7 @@ async fn create_admin_account(db: &Database, username: &str, password: &str) -> 
 
 /// Hashes a plaintext password using Argon2 with a random salt (same construction
 /// as the site's `crate::auth::hash_password`).
-fn hash_password(password: &str) -> anyhow::Result<String> {
+pub(crate) fn hash_password(password: &str) -> anyhow::Result<String> {
     let argon2 = Argon2::default();
     let salt = SaltString::generate(&mut OsRng);
     Ok(argon2
@@ -829,7 +1055,7 @@ fn hash_password(password: &str) -> anyhow::Result<String> {
 
 /// Verifies a plaintext password against an Argon2 PHC hash (constant-time within
 /// Argon2's verifier). A malformed stored hash verifies as `false`.
-fn verify_password(password: &str, hash: &str) -> bool {
+pub(crate) fn verify_password(password: &str, hash: &str) -> bool {
     match PasswordHash::new(hash) {
         Ok(parsed) => Argon2::default().verify_password(password.as_bytes(), &parsed).is_ok(),
         Err(_) => false,
@@ -907,16 +1133,16 @@ mod tests {
 
     /// A form POST carrying a `ConnectInfo` peer (the login handlers require it
     /// for the per-IP lockout; the router only injects it when served over TCP).
-    fn form_post(uri: &str, body: &'static str) -> HttpRequest<Body> {
+    fn form_post(uri: &str, body: impl Into<Body>) -> HttpRequest<Body> {
         form_post_from(uri, body, "203.0.113.7:5555")
     }
 
-    fn form_post_from(uri: &str, body: &'static str, peer: &str) -> HttpRequest<Body> {
+    fn form_post_from(uri: &str, body: impl Into<Body>, peer: &str) -> HttpRequest<Body> {
         let mut req = HttpRequest::builder()
             .method("POST")
             .uri(uri)
             .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
-            .body(Body::from(body))
+            .body(body.into())
             .unwrap();
         req.extensions_mut()
             .insert(ConnectInfo(peer.parse::<SocketAddr>().unwrap()));
@@ -1018,18 +1244,19 @@ mod tests {
         );
 
         // A wrong code is rejected.
-        let mut req = form_post("/login/2fa", "code=000000");
-        req.headers_mut()
-            .insert(COOKIE, HeaderValue::from_str(&challenge).unwrap());
-        let res = app.clone().oneshot(req).await.unwrap();
+        let res = app
+            .clone()
+            .oneshot(form_post_with_cookie("/login/2fa", "code=000000", &challenge))
+            .await
+            .unwrap();
         assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 
         // The correct current code completes the login (mints a session cookie).
         let code = totp::current_code(secret);
-        let mut req = form_post("/login/2fa", Box::leak(format!("code={code}").into_boxed_str()));
-        req.headers_mut()
-            .insert(COOKIE, HeaderValue::from_str(&challenge).unwrap());
-        let res = app.oneshot(req).await.unwrap();
+        let res = app
+            .oneshot(form_post_with_cookie("/login/2fa", format!("code={code}"), &challenge))
+            .await
+            .unwrap();
         assert_eq!(res.status(), StatusCode::SEE_OTHER);
         assert_eq!(res.headers().get("location").unwrap(), "/");
         assert!(
@@ -1157,6 +1384,88 @@ mod tests {
         assert_eq!(res.status(), StatusCode::FORBIDDEN);
 
         std::fs::remove_file(&db_file).ok();
+    }
+
+    /// Safe mode, engaged, turns a destructive host mutation away with 423 at the
+    /// middleware — before the handler (or the DB) is reached — while a read of the
+    /// same slice still answers. The gate is off by default, so every other test in
+    /// the suite is unaffected.
+    #[tokio::test]
+    async fn safe_mode_freezes_destructive_requests_but_not_reads() {
+        let state = test_state().await;
+        create_admin_account(&state.db, "root", "hunter2!").await.unwrap();
+        // Engage safe mode directly on the live atomic (the toggle route is sudo-
+        // gated; this test is about the gate, not the toggle).
+        state.safe_mode.store(true, std::sync::atomic::Ordering::Relaxed);
+        let app = build_router(state);
+
+        let res = app
+            .clone()
+            .oneshot(form_post("/login", "username=root&password=hunter2!"))
+            .await
+            .unwrap();
+        let cookie_pair = set_cookie_pair(&res);
+
+        // A destructive POST is refused with 423 Locked and the machine-readable
+        // marker the frontend keys off.
+        let mut req = form_post("/firewall/apply", "");
+        req.headers_mut()
+            .insert(COOKIE, HeaderValue::from_str(&cookie_pair).unwrap());
+        let res = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::LOCKED);
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        assert!(
+            String::from_utf8_lossy(&body).contains("safe_mode"),
+            "missing the marker"
+        );
+
+        // A read of the same slice is untouched — safe mode stops changes, not sight.
+        let res = app
+            .oneshot(get_with_cookie("/firewall/data", &cookie_pair))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    /// Confirming (or reverting) an armed apply stays reachable even with safe
+    /// mode engaged — the §11.1 exemption that keeps an operator from being
+    /// stranded mid-flow. An unknown token simply reports nothing was kept.
+    #[tokio::test]
+    async fn confirming_an_apply_is_reachable_under_safe_mode() {
+        let state = test_state().await;
+        create_admin_account(&state.db, "root", "hunter2!").await.unwrap();
+        state.safe_mode.store(true, std::sync::atomic::Ordering::Relaxed);
+        let app = build_router(state);
+
+        let res = app
+            .clone()
+            .oneshot(form_post("/login", "username=root&password=hunter2!"))
+            .await
+            .unwrap();
+        let cookie_pair = set_cookie_pair(&res);
+
+        // The arming apply itself is frozen…
+        let mut apply = form_post("/firewall/apply", "");
+        apply
+            .headers_mut()
+            .insert(COOKIE, HeaderValue::from_str(&cookie_pair).unwrap());
+        assert_eq!(app.clone().oneshot(apply).await.unwrap().status(), StatusCode::LOCKED);
+
+        // …but confirming an armed apply is not — it must always be able to complete.
+        let mut confirm = HttpRequest::builder()
+            .method("POST")
+            .uri("/firewall/apply/confirm")
+            .header(CONTENT_TYPE, "application/json")
+            .header(COOKIE, &cookie_pair)
+            .body(Body::from(r#"{"token":"nonexistent"}"#))
+            .unwrap();
+        confirm
+            .extensions_mut()
+            .insert(ConnectInfo("203.0.113.7:5555".parse::<SocketAddr>().unwrap()));
+        let res = app.oneshot(confirm).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK, "confirm must not be frozen by safe mode");
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        assert!(String::from_utf8_lossy(&body).contains("\"kept\":false"));
     }
 
     /// The live WebSocket is auth-gated: an unauthenticated upgrade is bounced to
@@ -1400,10 +1709,10 @@ mod tests {
         let html = String::from_utf8_lossy(&body);
         assert!(html.contains("No services configured"), "empty-state copy missing");
         assert!(
-            html.contains("Docker not available"),
+            html.contains("Docker isn't reachable"),
             "unavailable graph notice missing"
         );
-        assert!(html.contains("/static/js/services.js"), "services script not linked");
+        assert!(html.contains("/static/js/pages/docker.js"), "docker script not linked");
 
         // The in-memory action log starts empty.
         let res = app
@@ -1462,8 +1771,8 @@ mod tests {
         assert_eq!(res.status(), StatusCode::OK);
         let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
         let html = String::from_utf8_lossy(&body);
-        assert!(html.contains("Container Snapshots"), "page heading missing");
-        assert!(html.contains("Docker not available"), "unavailable notice missing");
+        assert!(html.contains("Snapshots"), "page heading missing");
+        assert!(html.contains("Docker isn't reachable"), "unavailable notice missing");
 
         // The list is empty and served from the migrated table (not a 500).
         let res = app
@@ -1537,8 +1846,11 @@ mod tests {
         assert_eq!(res.status(), StatusCode::OK);
         let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
         let html = String::from_utf8_lossy(&body);
-        assert!(html.contains("Secret scanner"), "heading missing");
-        assert!(html.contains("/static/js/secrets.js"), "script not linked");
+        assert!(html.contains("<h1>Secrets</h1>"), "heading missing");
+        assert!(html.contains("/static/js/pages/secrets.js"), "script not linked");
+        // No paths are configured in the test config, so the page must say the
+        // scanner is idle rather than implying it is watching something.
+        assert!(html.contains("The scanner is idle"), "scanner-disabled callout missing");
 
         // The data endpoint returns empty findings from the migrated tables.
         let res = app
@@ -1664,7 +1976,7 @@ mod tests {
         let html = String::from_utf8_lossy(&body);
         assert!(html.contains("Firewall"), "heading missing");
         assert!(html.contains("disabled"), "backend label missing");
-        assert!(html.contains("/static/js/firewall.js"), "script not linked");
+        assert!(html.contains("/static/js/pages/firewall.js"), "script not linked");
 
         // Empty data with the disabled backend + auto-lockout policy numbers.
         let res = app
@@ -1769,11 +2081,828 @@ mod tests {
         let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
         let html = String::from_utf8_lossy(&body);
         assert!(html.contains("Vantage"), "layout chrome missing");
-        assert!(html.contains("Certs"), "page heading missing");
+        assert!(html.contains("<h1>Certificates</h1>"), "page heading missing");
+        assert!(html.contains("No proxy routes"), "empty-state proxy copy missing");
         assert!(
-            html.contains("No proxy routes configured"),
-            "empty-state proxy copy missing"
+            html.contains("Nothing else is being watched"),
+            "empty-state monitor copy missing"
         );
-        assert!(html.contains("No SSL monitors"), "empty-state monitor copy missing");
+    }
+
+    // --- Account & security (Phase 9) ---
+
+    /// A JSON POST carrying a session cookie and a peer address.
+    fn json_post_with_cookie(uri: &str, body: impl Into<Body>, cookie_pair: &str) -> HttpRequest<Body> {
+        json_post_from(uri, body, cookie_pair, "203.0.113.7:5555")
+    }
+
+    fn json_post_from(uri: &str, body: impl Into<Body>, cookie_pair: &str, peer: &str) -> HttpRequest<Body> {
+        let mut req = HttpRequest::builder()
+            .method("POST")
+            .uri(uri)
+            .header(CONTENT_TYPE, "application/json")
+            .header(COOKIE, cookie_pair)
+            .body(body.into())
+            .unwrap();
+        req.extensions_mut()
+            .insert(ConnectInfo(peer.parse::<SocketAddr>().unwrap()));
+        req
+    }
+
+    /// A form POST carrying both a cookie and a peer (the 2FA challenge needs both).
+    fn form_post_with_cookie(uri: &str, body: impl Into<Body>, cookie_pair: &str) -> HttpRequest<Body> {
+        let mut req = form_post(uri, body);
+        req.headers_mut()
+            .insert(COOKIE, HeaderValue::from_str(cookie_pair).unwrap());
+        req
+    }
+
+    /// Logs `root` in and returns the session cookie pair.
+    async fn login_as_root(app: &Router) -> String {
+        let res = app
+            .clone()
+            .oneshot(form_post("/login", "username=root&password=hunter2!"))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::SEE_OTHER, "login did not succeed");
+        set_cookie_pair(&res)
+    }
+
+    async fn json_body(res: axum::response::Response) -> serde_json::Value {
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        serde_json::from_slice(&bytes).expect("response was not JSON")
+    }
+
+    /// The account page is gated, renders through the layout, and its session
+    /// list reports the browser making the request as the current session —
+    /// with the provenance the login path recorded.
+    #[tokio::test]
+    async fn account_page_gates_and_lists_the_current_session() {
+        let state = test_state().await;
+        create_admin_account(&state.db, "root", "hunter2!").await.unwrap();
+        let app = build_router(state);
+
+        let res = app.clone().oneshot(get("/account")).await.unwrap();
+        assert_eq!(res.status(), StatusCode::SEE_OTHER);
+        assert_eq!(res.headers().get("location").unwrap(), "/login");
+
+        let cookie_pair = login_as_root(&app).await;
+
+        let res = app
+            .clone()
+            .oneshot(get_with_cookie("/account", &cookie_pair))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        let html = String::from_utf8_lossy(&body);
+        assert!(html.contains("Two-factor authentication"), "page copy missing");
+        // A fresh account has no second factor: the page must offer to set one
+        // up rather than to turn one off.
+        assert!(html.contains(r#"id="totp-enable""#), "enroll control missing");
+        assert!(
+            !html.contains(r#"id="totp-disable""#),
+            "offered to disable an absent factor"
+        );
+
+        let res = app
+            .clone()
+            .oneshot(get_with_cookie("/account/sessions", &cookie_pair))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let json = json_body(res).await;
+        let sessions = json["sessions"].as_array().unwrap();
+        assert_eq!(sessions.len(), 1, "expected exactly the session we just made");
+        assert_eq!(sessions[0]["current"], true, "the requesting session must be flagged");
+        assert_eq!(
+            sessions[0]["ip"], "203.0.113.7",
+            "login did not record the source address"
+        );
+    }
+
+    /// The sudo gate: being signed in is not enough to change a credential, and
+    /// the refusal is the machine-readable one the frontend turns into a prompt.
+    /// Re-authenticating opens the window, and the password change then lands.
+    #[tokio::test]
+    async fn changing_a_password_requires_a_fresh_reauth() {
+        let state = test_state().await;
+        create_admin_account(&state.db, "root", "hunter2!").await.unwrap();
+        let app = build_router(state);
+        let cookie_pair = login_as_root(&app).await;
+        // Its own source address: this test deliberately fails a password check,
+        // and `lockout` is process-global, so sharing an IP with another test
+        // would make both of them depend on the order they ran in.
+        let peer = "203.0.113.21:5555";
+
+        // Signed in, but not recently re-authenticated.
+        let res = app
+            .clone()
+            .oneshot(json_post_from(
+                "/account/password",
+                r#"{"new_password":"a-much-longer-password"}"#,
+                &cookie_pair,
+                peer,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+        let json = json_body(res).await;
+        assert_eq!(json["reauth_required"], true, "the reauth marker is the API contract");
+
+        // A wrong password does not open the window.
+        let res = app
+            .clone()
+            .oneshot(json_post_from(
+                "/account/reauth",
+                r#"{"password":"wrong"}"#,
+                &cookie_pair,
+                peer,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+
+        // The right one does.
+        let res = app
+            .clone()
+            .oneshot(json_post_from(
+                "/account/reauth",
+                r#"{"password":"hunter2!"}"#,
+                &cookie_pair,
+                peer,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        // Too short is refused on its own terms — not with the sudo error.
+        let res = app
+            .clone()
+            .oneshot(json_post_from(
+                "/account/password",
+                r#"{"new_password":"short"}"#,
+                &cookie_pair,
+                peer,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
+        let res = app
+            .clone()
+            .oneshot(json_post_from(
+                "/account/password",
+                r#"{"new_password":"a-much-longer-password"}"#,
+                &cookie_pair,
+                peer,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        // The new password works and the old one does not.
+        let res = app
+            .clone()
+            .oneshot(form_post("/login", "username=root&password=hunter2!"))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED, "the old password still works");
+        let res = app
+            .clone()
+            .oneshot(form_post("/login", "username=root&password=a-much-longer-password"))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::SEE_OTHER);
+    }
+
+    /// Revoking a session takes effect on that session's next request, and the
+    /// session doing the revoking survives.
+    #[tokio::test]
+    async fn revoking_other_sessions_ends_them_and_spares_this_one() {
+        let state = test_state().await;
+        create_admin_account(&state.db, "root", "hunter2!").await.unwrap();
+        let app = build_router(state);
+
+        let first = login_as_root(&app).await;
+        let second = login_as_root(&app).await;
+        assert_ne!(first, second, "two logins must mint two sessions");
+
+        let res = app
+            .clone()
+            .oneshot(json_post_with_cookie("/account/sessions/revoke-all", "{}", &second))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(json_body(res).await["revoked"], 1);
+
+        // The revoked session is bounced; the revoking one still works.
+        let res = app.clone().oneshot(get_with_cookie("/account", &first)).await.unwrap();
+        assert_eq!(res.status(), StatusCode::SEE_OTHER);
+        let res = app.clone().oneshot(get_with_cookie("/account", &second)).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    /// The whole enrollment round trip through the router: start, verify the
+    /// code the returned secret generates, get recovery codes back — and then a
+    /// recovery code signs in at the 2FA challenge exactly once.
+    #[tokio::test]
+    async fn totp_enrollment_round_trips_and_recovery_codes_are_single_use() {
+        let state = test_state().await;
+        create_admin_account(&state.db, "root", "hunter2!").await.unwrap();
+        let app = build_router(state.clone());
+        let cookie_pair = login_as_root(&app).await;
+
+        // Enrollment is destructive-adjacent, so it is sudo-gated like the rest.
+        let res = app
+            .clone()
+            .oneshot(json_post_with_cookie("/account/totp/start", "{}", &cookie_pair))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+        let res = app
+            .clone()
+            .oneshot(json_post_with_cookie(
+                "/account/reauth",
+                r#"{"password":"hunter2!"}"#,
+                &cookie_pair,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let res = app
+            .clone()
+            .oneshot(json_post_with_cookie("/account/totp/start", "{}", &cookie_pair))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let start = json_body(res).await;
+        let token = start["token"].as_str().unwrap().to_owned();
+        assert!(start["uri"].as_str().unwrap().starts_with("otpauth://totp/"));
+        assert!(start["qr"]["width"].as_u64().unwrap() > 0);
+
+        // Starting does not enable: an unverified secret must not lock anyone out.
+        let enabled: i64 = state
+            .db
+            .get_row("SELECT totp_enabled FROM account WHERE name = 'root'", (), |r| r.get(0))
+            .await
+            .unwrap();
+        assert_eq!(enabled, 0, "enrollment enabled the factor before it was verified");
+
+        // The secret we were handed must generate a code the server accepts.
+        let secret = start["secret"].as_str().unwrap();
+        let raw = decode_base32(secret);
+        let code = totp::current_code(&raw);
+        let res = app
+            .clone()
+            .oneshot(json_post_with_cookie(
+                "/account/totp/enable",
+                format!(r#"{{"token":"{token}","code":"{code}"}}"#),
+                &cookie_pair,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let codes: Vec<String> = json_body(res).await["recovery_codes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c.as_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(codes.len(), 10);
+
+        // Signing in now stops at the 2FA challenge…
+        let res = app
+            .clone()
+            .oneshot(form_post("/login", "username=root&password=hunter2!"))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::SEE_OTHER);
+        assert_eq!(res.headers().get("location").unwrap(), "/login/2fa");
+        let challenge = set_cookie_pair(&res);
+
+        // …and a recovery code gets past it.
+        let body = format!("code={}", codes[0]);
+        let res = app
+            .clone()
+            .oneshot(form_post_with_cookie("/login/2fa", body.clone(), &challenge))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::SEE_OTHER);
+        assert_eq!(res.headers().get("location").unwrap(), "/");
+
+        // The same code a second time does not: that is what single-use means.
+        let res = app
+            .clone()
+            .oneshot(form_post("/login", "username=root&password=hunter2!"))
+            .await
+            .unwrap();
+        let challenge = set_cookie_pair(&res);
+        let res = app
+            .oneshot(form_post_with_cookie("/login/2fa", body, &challenge))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    // --- Alerts (Phase 10) ---
+
+    /// The alerts page is gated, and with no sink in `config.json` it reports
+    /// all four as absent rather than pretending alerting is live.
+    #[tokio::test]
+    async fn alerts_page_gates_and_reports_no_sink_configured() {
+        let state = test_state().await;
+        create_admin_account(&state.db, "root", "hunter2!").await.unwrap();
+        let app = build_router(state);
+
+        let res = app.clone().oneshot(get("/alerts")).await.unwrap();
+        assert_eq!(res.status(), StatusCode::SEE_OTHER);
+
+        let cookie_pair = login_as_root(&app).await;
+        let res = app
+            .clone()
+            .oneshot(get_with_cookie("/alerts", &cookie_pair))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        let html = String::from_utf8_lossy(&body);
+        assert!(
+            html.contains("No alert sink is configured"),
+            "an unconfigured install must say so"
+        );
+
+        let res = app
+            .clone()
+            .oneshot(get_with_cookie("/alerts/data", &cookie_pair))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let json = json_body(res).await;
+        let sinks = json["sinks"].as_array().unwrap();
+        assert_eq!(sinks.len(), 4, "every sink is listed, configured or not");
+        assert!(
+            sinks.iter().all(|s| s["configured"] == false && s["target"].is_null()),
+            "test config has no sinks"
+        );
+        // Absent state means enabled: a fresh install must alert once a sink
+        // appears, without anyone finding a switch first.
+        assert!(sinks.iter().all(|s| s["enabled"] == true));
+        assert_eq!(json["on_admin_login"], false, "sign-in alerts default off");
+        assert!(json["deliveries"].as_array().unwrap().is_empty());
+    }
+
+    /// Switching an alert sink off is sudo-gated — it is the most useful thing
+    /// to do to a box you have just broken into.
+    #[tokio::test]
+    async fn muting_a_sink_requires_reauth_and_then_sticks() {
+        let state = test_state().await;
+        create_admin_account(&state.db, "root", "hunter2!").await.unwrap();
+        let app = build_router(state.clone());
+        let cookie_pair = login_as_root(&app).await;
+
+        let res = app
+            .clone()
+            .oneshot(json_post_with_cookie(
+                "/alerts/sinks/discord",
+                r#"{"enabled":false}"#,
+                &cookie_pair,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+        assert_eq!(json_body(res).await["reauth_required"], true);
+
+        let res = app
+            .clone()
+            .oneshot(json_post_with_cookie(
+                "/account/reauth",
+                r#"{"password":"hunter2!"}"#,
+                &cookie_pair,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let res = app
+            .clone()
+            .oneshot(json_post_with_cookie(
+                "/alerts/sinks/discord",
+                r#"{"enabled":false}"#,
+                &cookie_pair,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+        assert!(
+            !alerts::sink_enabled(&state.db, "discord").await,
+            "the mute did not persist"
+        );
+        // Muting one sink must not mute the others.
+        assert!(alerts::sink_enabled(&state.db, "ntfy").await);
+
+        // An unknown sink is a 404, not a silently-created storage row.
+        let res = app
+            .clone()
+            .oneshot(json_post_with_cookie(
+                "/alerts/sinks/carrier-pigeon",
+                r#"{"enabled":false}"#,
+                &cookie_pair,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    }
+
+    /// Testing a sink that isn't configured says so, rather than reporting a
+    /// success for a message that went nowhere.
+    #[tokio::test]
+    async fn testing_an_unconfigured_sink_is_a_conflict() {
+        let state = test_state().await;
+        create_admin_account(&state.db, "root", "hunter2!").await.unwrap();
+        let app = build_router(state);
+        let cookie_pair = login_as_root(&app).await;
+
+        let res = app
+            .clone()
+            .oneshot(json_post_with_cookie("/alerts/test/discord", "", &cookie_pair))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::CONFLICT);
+    }
+
+    // ─── Audit ───────────────────────────────────────────────────────────────
+
+    /// The end-to-end property: an action performed over HTTP shows up on the
+    /// audit page. Testing `audit::log` in isolation would prove the table
+    /// works, not that anything writes to it.
+    #[tokio::test]
+    async fn a_real_action_lands_in_the_audit_log() {
+        let state = test_state().await;
+        create_admin_account(&state.db, "root", "hunter2!").await.unwrap();
+        let app = build_router(state.clone());
+
+        let res = app.clone().oneshot(get("/audit")).await.unwrap();
+        assert_eq!(res.status(), StatusCode::SEE_OTHER);
+
+        let cookie_pair = login_as_root(&app).await;
+
+        // Signing in is itself auditable, and the page must show it — an audit
+        // log that cannot tell you someone logged in is not one.
+        let res = app
+            .clone()
+            .oneshot(get_with_cookie("/audit/data", &cookie_pair))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let json = json_body(res).await;
+        assert_eq!(json["entries"][0]["action"], "account.login");
+        assert_eq!(json["entries"][0]["actor"], "root");
+
+        // Now a real action, through the router, with no audit call in sight.
+        let res = app
+            .clone()
+            .oneshot(form_post_with_cookie(
+                "/database/query",
+                "sql=DROP+TABLE+account&danger_mode=false",
+                &cookie_pair,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN, "safe mode should refuse that");
+
+        let res = app
+            .clone()
+            .oneshot(get_with_cookie("/audit/data", &cookie_pair))
+            .await
+            .unwrap();
+        let json = json_body(res).await;
+        let top = &json["entries"][0];
+        assert_eq!(top["action"], "database.query.blocked");
+        // The refused attempt is recorded *as* refused. This is the row the log
+        // exists for, and recording it as a success would be worse than nothing.
+        assert_eq!(top["ok"], false);
+        assert!(top["detail"]["sql"].as_str().unwrap().contains("DROP TABLE"));
+        assert!(json["actions"]
+            .as_array()
+            .unwrap()
+            .contains(&"database.query.blocked".into()));
+    }
+
+    /// A failed sign-in is recorded against the username that was typed, even
+    /// when no such account exists.
+    #[tokio::test]
+    async fn a_failed_sign_in_is_recorded_against_the_name_that_was_typed() {
+        let state = test_state().await;
+        create_admin_account(&state.db, "root", "hunter2!").await.unwrap();
+        let app = build_router(state.clone());
+
+        // Own peer address: `lockout` is process-global, so a wrong password
+        // here must not spend another test's budget.
+        let res = app
+            .clone()
+            .oneshot(form_post_from(
+                "/login",
+                "username=ghost&password=wrong",
+                "203.0.113.44:5555",
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+
+        let entries = audit::entries(
+            &state.db,
+            audit::Filter {
+                limit: 10,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].action, "account.login.failed");
+        assert_eq!(entries[0].actor, "ghost", "the typed name is the fact worth keeping");
+        assert!(!entries[0].ok);
+        assert_eq!(entries[0].ip.as_deref(), Some("203.0.113.44"));
+    }
+
+    /// Filters compose, and the page's paging cursor does not repeat a row.
+    #[tokio::test]
+    async fn the_audit_page_filters_and_pages() {
+        let state = test_state().await;
+        create_admin_account(&state.db, "root", "hunter2!").await.unwrap();
+        let app = build_router(state.clone());
+        let cookie_pair = login_as_root(&app).await;
+
+        for i in 0..4 {
+            let res = app
+                .clone()
+                .oneshot(form_post_with_cookie(
+                    "/database/query",
+                    format!("sql=SELECT+{i}&danger_mode=false"),
+                    &cookie_pair,
+                ))
+                .await
+                .unwrap();
+            assert_eq!(res.status(), StatusCode::OK);
+        }
+
+        // Area prefix: one filter for "everything the database console did".
+        let res = app
+            .clone()
+            .oneshot(get_with_cookie("/audit/data?action=database.&limit=2", &cookie_pair))
+            .await
+            .unwrap();
+        let json = json_body(res).await;
+        let page = json["entries"].as_array().unwrap();
+        assert_eq!(page.len(), 2);
+        assert!(page.iter().all(|e| e["action"] == "database.query"));
+        assert_eq!(json["more"], true, "two of four means there is another page");
+
+        // The next page starts strictly below the last id seen.
+        let last = page[1]["id"].as_i64().unwrap();
+        let res = app
+            .clone()
+            .oneshot(get_with_cookie(
+                &format!("/audit/data?action=database.&limit=2&before={last}"),
+                &cookie_pair,
+            ))
+            .await
+            .unwrap();
+        let json = json_body(res).await;
+        let next = json["entries"].as_array().unwrap();
+        assert!(next.iter().all(|e| e["id"].as_i64().unwrap() < last));
+
+        // An empty filter value is "no filter", not "match the empty string" —
+        // which is what a cleared search box sends.
+        let res = app
+            .clone()
+            .oneshot(get_with_cookie("/audit/data?q=&actor=", &cookie_pair))
+            .await
+            .unwrap();
+        let json = json_body(res).await;
+        assert!(
+            !json["entries"].as_array().unwrap().is_empty(),
+            "a cleared filter box must not blank the page"
+        );
+    }
+
+    // ─── Scripts ─────────────────────────────────────────────────────────────
+
+    /// A state whose config declares `scripts`, since scripts come from
+    /// config.json and there is deliberately no route that creates one.
+    async fn state_with_scripts(scripts: Vec<config::SpotlightScript>) -> AppState {
+        let mut cfg = Config::test_default();
+        cfg.spotlight_scripts = scripts;
+        build_state_with(cfg, Path::new(":memory:")).await.expect("build state")
+    }
+
+    fn script(id: &str, command: &str, schedule: Option<&str>) -> config::SpotlightScript {
+        config::SpotlightScript {
+            id: id.to_string(),
+            name: format!("The {id} script"),
+            command: command.to_string(),
+            description: None,
+            cwd: None,
+            schedule: schedule.map(str::to_string),
+        }
+    }
+
+    #[tokio::test]
+    async fn scripts_page_gates_and_says_when_none_are_configured() {
+        let state = test_state().await;
+        create_admin_account(&state.db, "root", "hunter2!").await.unwrap();
+        let app = build_router(state);
+
+        let res = app.clone().oneshot(get("/scripts")).await.unwrap();
+        assert_eq!(res.status(), StatusCode::SEE_OTHER);
+
+        let cookie_pair = login_as_root(&app).await;
+        let res = app
+            .clone()
+            .oneshot(get_with_cookie("/scripts", &cookie_pair))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        let html = String::from_utf8_lossy(&body);
+        assert!(
+            html.contains("No scripts are configured"),
+            "an empty install must say so"
+        );
+
+        let res = app
+            .clone()
+            .oneshot(get_with_cookie("/scripts/data", &cookie_pair))
+            .await
+            .unwrap();
+        let json = json_body(res).await;
+        assert!(json["scripts"].as_array().unwrap().is_empty());
+        assert!(json["runs"].as_array().unwrap().is_empty());
+    }
+
+    /// The app's one arbitrary-command path: sudo-gated, and what it did is
+    /// recorded rather than left in the logs.
+    #[tokio::test]
+    async fn running_a_script_requires_reauth_and_records_what_it_did() {
+        let state = state_with_scripts(vec![script("hello", "echo vantage-was-here", None)]).await;
+        create_admin_account(&state.db, "root", "hunter2!").await.unwrap();
+        let app = build_router(state.clone());
+        let cookie_pair = login_as_root(&app).await;
+
+        let res = app
+            .clone()
+            .oneshot(json_post_with_cookie("/scripts/hello/run", "", &cookie_pair))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+        assert_eq!(json_body(res).await["reauth_required"], true);
+
+        let res = app
+            .clone()
+            .oneshot(json_post_with_cookie(
+                "/account/reauth",
+                r#"{"password":"hunter2!"}"#,
+                &cookie_pair,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let res = app
+            .clone()
+            .oneshot(json_post_with_cookie("/scripts/hello/run", "", &cookie_pair))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let json = json_body(res).await;
+        assert_eq!(json["ok"], true);
+        assert_eq!(json["exit_code"], 0);
+        assert!(
+            json["output"].as_str().unwrap().contains("vantage-was-here"),
+            "the script's output is the reason the button exists"
+        );
+
+        // The run outlives the request: this is the thing that was missing when
+        // a scheduled script's only trace was a tracing line.
+        let runs = cron::recent_runs(&state.db, None, 10).await.unwrap();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].script_id, "hello");
+        assert_eq!(runs[0].trigger, "manual");
+        assert_eq!(runs[0].actor.as_deref(), Some("root"), "a manual run names who ran it");
+        assert!(runs[0].ok);
+
+        // …and the card can show it without a second query.
+        let res = app
+            .clone()
+            .oneshot(get_with_cookie("/scripts/data", &cookie_pair))
+            .await
+            .unwrap();
+        let json = json_body(res).await;
+        assert_eq!(json["scripts"][0]["last_run"]["ok"], true);
+        assert_eq!(json["scripts"][0]["running"], false);
+
+        // A script that isn't in config.json cannot be conjured by URL.
+        let res = app
+            .clone()
+            .oneshot(json_post_with_cookie("/scripts/rm-rf-slash/run", "", &cookie_pair))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    }
+
+    /// A failing script is reported as failing, with its output — the whole
+    /// point being that you can tell *why* from the page.
+    #[tokio::test]
+    async fn a_failing_script_reports_its_exit_code() {
+        let state = state_with_scripts(vec![script("boom", "exit 3", None)]).await;
+        create_admin_account(&state.db, "root", "hunter2!").await.unwrap();
+        let app = build_router(state.clone());
+        let cookie_pair = login_as_root(&app).await;
+        let res = app
+            .clone()
+            .oneshot(json_post_with_cookie(
+                "/account/reauth",
+                r#"{"password":"hunter2!"}"#,
+                &cookie_pair,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let res = app
+            .clone()
+            .oneshot(json_post_with_cookie("/scripts/boom/run", "", &cookie_pair))
+            .await
+            .unwrap();
+        // The *request* succeeded; the script did not. Conflating those would
+        // make a failed script look like a broken page.
+        assert_eq!(res.status(), StatusCode::OK);
+        let json = json_body(res).await;
+        assert_eq!(json["ok"], false);
+        assert_eq!(json["exit_code"], 3);
+
+        let runs = cron::recent_runs(&state.db, Some("boom".to_string()), 10)
+            .await
+            .unwrap();
+        assert_eq!(runs.len(), 1);
+        assert!(!runs[0].ok);
+        assert_eq!(runs[0].exit_code, Some(3));
+    }
+
+    /// A script configured to run automatically that never will is the worst
+    /// state this page can be in, so the schedule is parsed for the page.
+    #[tokio::test]
+    async fn a_broken_schedule_is_reported_not_silently_ignored() {
+        let state = state_with_scripts(vec![
+            script("nightly", "echo ok", Some("30 3 * * *")),
+            script("typo", "echo ok", Some("30 3 * *")),
+        ])
+        .await;
+        create_admin_account(&state.db, "root", "hunter2!").await.unwrap();
+        let app = build_router(state);
+        let cookie_pair = login_as_root(&app).await;
+
+        let res = app
+            .clone()
+            .oneshot(get_with_cookie("/scripts/data", &cookie_pair))
+            .await
+            .unwrap();
+        let json = json_body(res).await;
+
+        let good = &json["scripts"][0];
+        assert!(good["schedule_error"].is_null());
+        assert!(
+            good["next_run"].is_string(),
+            "a valid schedule knows when it next fires"
+        );
+
+        let bad = &json["scripts"][1];
+        assert!(
+            bad["schedule_error"].as_str().unwrap().contains("5 fields"),
+            "a typo'd schedule must say why it will never fire"
+        );
+        assert!(bad["next_run"].is_null());
+    }
+
+    /// Test-only inverse of `account::base32_encode`, so the enrollment test can
+    /// drive the real client's path: scan the secret, generate a code from it.
+    fn decode_base32(encoded: &str) -> Vec<u8> {
+        const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+        let mut out = Vec::new();
+        let mut buffer: u32 = 0;
+        let mut bits: u32 = 0;
+        for c in encoded.bytes() {
+            let value = ALPHABET.iter().position(|&a| a == c).expect("not base32") as u32;
+            buffer = (buffer << 5) | value;
+            bits += 5;
+            if bits >= 8 {
+                bits -= 8;
+                out.push((buffer >> bits) as u8);
+            }
+        }
+        out
     }
 }

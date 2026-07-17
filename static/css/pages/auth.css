@@ -1,0 +1,166 @@
+/* Login and the 2FA challenge.
+ *
+ * Standalone: no app shell, so this file owns its own page frame rather than
+ * composing on top of shell.css. It is the only stylesheet a logged-out visitor
+ * ever loads. */
+
+@layer pages {
+  .auth-body {
+    min-height: 100vh;
+    /* svh tracks the *visible* viewport on mobile, so the card doesn't sit
+       under the browser's collapsing address bar. */
+    min-height: 100svh;
+    background: var(--bg-0);
+  }
+
+  .auth {
+    min-height: 100svh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--sp-5);
+    padding: var(--sp-5);
+  }
+
+  .auth-card {
+    width: 100%;
+    max-width: 22rem;
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-4);
+    padding: var(--sp-6);
+    background: var(--bg-1);
+    border: 1px solid var(--line-2);
+    border-radius: var(--r-l);
+    box-shadow: var(--shadow-2);
+  }
+
+  .auth-brand {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    color: var(--acc);
+  }
+
+  .auth-brand .scope {
+    width: 22px;
+    height: 22px;
+  }
+
+  /* The brand mark here is static. On the app shell it sweeps to signal a live
+     socket — there is no socket on this page, and an animation that means
+     "connected" everywhere else must not appear where it means nothing. */
+  .auth-brand .scope-ring {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    opacity: 0.9;
+  }
+
+  .auth-brand .scope-grid {
+    stroke: currentColor;
+    stroke-width: 1;
+    opacity: 0.35;
+  }
+
+  .auth-brand .scope-dot {
+    fill: currentColor;
+  }
+
+  .auth-brand-name {
+    font-size: var(--fs-md);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--ink-1);
+  }
+
+  .auth-title {
+    margin: 0;
+    font-size: var(--fs-2xl);
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: var(--ink-1);
+  }
+
+  .auth-intro {
+    margin: calc(var(--sp-3) * -1) 0 0;
+    font-size: var(--fs-sm);
+    color: var(--ink-2);
+  }
+
+  .auth-intro:empty {
+    display: none;
+  }
+
+  .auth-error {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    padding: var(--sp-3);
+    background: color-mix(in srgb, var(--down) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--down) 40%, transparent);
+    border-radius: var(--r-m);
+    font-size: var(--fs-sm);
+    color: var(--ink-1);
+  }
+
+  .auth-error .icon {
+    flex: none;
+    color: var(--down);
+  }
+
+  .auth-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-4);
+  }
+
+  /* `.code-input` (the six-digit TOTP field) moved to components.css when the
+     account page's enrollment modal grew one too. */
+
+  /* The recovery-code escape hatch. Collapsed and quiet: it is the right answer
+     roughly once in the life of an account, and a second code field competing
+     with the first for attention on every sign-in is how you get people typing
+     their authenticator code into the wrong box. */
+  .auth-alt {
+    margin-top: var(--sp-5);
+    padding-top: var(--sp-5);
+    border-top: 1px solid var(--line-1);
+    font-size: var(--fs-sm);
+  }
+
+  .auth-alt summary {
+    cursor: pointer;
+    color: var(--ink-2);
+    width: fit-content;
+  }
+
+  .auth-alt summary:hover {
+    color: var(--ink-1);
+  }
+
+  .auth-alt .auth-form {
+    margin-top: var(--sp-4);
+  }
+
+  .auth-foot {
+    margin: 0;
+    font-size: var(--fs-xs);
+    color: var(--ink-3);
+  }
+
+  @media (max-width: 480px) {
+    .auth {
+      padding: var(--sp-4);
+      /* Top-align on a short screen: centring puts the fields under the
+         keyboard the moment it opens. */
+      justify-content: flex-start;
+      padding-top: var(--sp-7);
+    }
+
+    .auth-card {
+      padding: var(--sp-5);
+    }
+  }
+}

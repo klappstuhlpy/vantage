@@ -156,14 +156,36 @@ pub fn resolve(state: &AppState, name: &str) -> Option<PathBuf> {
     path.is_file().then_some(path)
 }
 
-/// The configured retention count (number of backups to keep).
-pub fn keep_count(state: &AppState) -> usize {
+/// The retention count `config.json` (or the built-in default) asks for.
+pub fn config_keep(state: &AppState) -> usize {
     state.config.backup.keep.unwrap_or(DEFAULT_KEEP)
 }
 
-/// The effective scheduled-backup interval in hours (0 = disabled).
-pub fn interval_hours(state: &AppState) -> u64 {
+/// The *effective* retention count: a dashboard override wins over `config.json`,
+/// which wins over the built-in default.
+pub fn keep_count(state: &AppState) -> usize {
+    state
+        .settings
+        .get()
+        .backup_keep
+        .or(state.config.backup.keep)
+        .unwrap_or(DEFAULT_KEEP)
+}
+
+/// The scheduled-backup interval in hours `config.json` (or the default) asks for.
+pub fn config_interval_hours(state: &AppState) -> u64 {
     state.config.backup.interval_hours.unwrap_or(DEFAULT_INTERVAL_HOURS)
+}
+
+/// The *effective* scheduled-backup interval in hours (0 = disabled): a dashboard
+/// override wins over `config.json`, which wins over the built-in default.
+pub fn interval_hours(state: &AppState) -> u64 {
+    state
+        .settings
+        .get()
+        .backup_interval_hours
+        .or(state.config.backup.interval_hours)
+        .unwrap_or(DEFAULT_INTERVAL_HOURS)
 }
 
 /// Off-site backup status for the data-protection dashboard.
@@ -251,6 +273,12 @@ pub fn spawn_remote_upload(state: AppState, path: PathBuf) {
 /// each fire one immediately, and paces retries when `create` keeps failing.
 const STARTUP_GRACE_SECS: u64 = 300;
 
+/// Upper bound on how long the scheduler sleeps before looking again. It caps
+/// the wait even when the next backup is far off, so a settings change (a
+/// shorter interval, or enabling a disabled schedule) is picked up within about
+/// an hour rather than after a multi-hour pending sleep.
+const SCHEDULE_RECHECK_SECS: u64 = 3600;
+
 /// Background scheduler: takes a backup every `backup.interval_hours` and
 /// prunes to `backup.keep`. A value of 0 hours disables the scheduler.
 ///
@@ -262,31 +290,49 @@ const STARTUP_GRACE_SECS: u64 = 300;
 /// otherwise the scheduler sleeps until `newest_backup + interval`. This matches
 /// the "next run" estimate shown in the admin UI.
 pub fn spawn_scheduler(state: AppState) {
-    let interval_hours = state.config.backup.interval_hours.unwrap_or(DEFAULT_INTERVAL_HOURS);
-    if interval_hours == 0 {
-        tracing::info!("scheduled backups disabled (backup.interval_hours = 0)");
-        return;
-    }
-    let keep = keep_count(&state);
-    let interval_secs = interval_hours * 3600;
+    // The scheduler always runs now — the interval is read live each iteration so
+    // the settings page can enable, disable, or re-time it without a restart. A
+    // disabled (0-hour) schedule just idles and re-checks.
     tokio::spawn(async move {
         loop {
-            // Re-read the newest backup each iteration so the next run is always
-            // anchored to the last successful backup (restart-durable).
+            let hours = interval_hours(&state);
+            if hours == 0 {
+                tokio::time::sleep(Duration::from_secs(SCHEDULE_RECHECK_SECS)).await;
+                continue;
+            }
+            let interval_secs = hours * 3600;
+
+            // Anchor the next run to the newest backup on disk (restart-durable).
             let now = OffsetDateTime::now_utc().unix_timestamp();
             let due_at = match list(&state).first() {
                 Some(b) => b.modified_unix + interval_secs as i64,
                 None => now, // never backed up — take one shortly after start-up
             };
-            let wait = (due_at - now).max(STARTUP_GRACE_SECS as i64) as u64;
-            tracing::info!(wait_secs = wait, "next scheduled backup in ~{wait}s");
+            // Cap the sleep so a shorter interval or a fresh enable is noticed
+            // within a bounded window instead of after a long pending wait.
+            let wait = ((due_at - now).max(STARTUP_GRACE_SECS as i64) as u64).min(SCHEDULE_RECHECK_SECS);
+            tracing::info!(wait_secs = wait, "next scheduled backup check in ~{wait}s");
             tokio::time::sleep(Duration::from_secs(wait)).await;
+
+            // The interval may have changed during the wait: only back up if we
+            // are still enabled and actually due.
+            let interval_secs = match interval_hours(&state) {
+                0 => continue,
+                h => h * 3600,
+            };
+            let now = OffsetDateTime::now_utc().unix_timestamp();
+            let due = list(&state)
+                .first()
+                .map_or(true, |b| now >= b.modified_unix + interval_secs as i64);
+            if !due {
+                continue;
+            }
 
             match create(&state).await {
                 Ok(path) => {
                     tracing::info!(path = %path.display(), "scheduled backup created");
                     spawn_remote_upload(state.clone(), path);
-                    prune(&state, keep);
+                    prune(&state, keep_count(&state));
                 }
                 Err(e) => tracing::warn!(error = %e, "scheduled backup failed"),
             }

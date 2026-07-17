@@ -2,89 +2,107 @@
 
 {% block title %}Database | Vantage{% endblock %}
 
-{% block head_css %}
-<style>
-    .db-grid { display: grid; grid-template-columns: minmax(220px, 320px) 1fr; gap: 1rem; align-items: start; }
-    .db-panel { background: var(--box-shade); border: 1px solid var(--box-border); border-radius: 10px; padding: 0.75rem; }
-    .db-panel h2 { margin: 0 0 0.6rem; font-size: 0.95rem; }
-    .db-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-    .db-table th, .db-table td { text-align: left; padding: 0.3rem 0.4rem; border-bottom: 1px solid var(--box-border); }
-    .db-table th.numeric, .db-table td.numeric { text-align: right; }
-    .db-table code { color: var(--branding); }
-    .db-runner-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.5rem; }
-    .db-sql { width: 100%; min-height: 8rem; resize: vertical; padding: 0.6rem; background: var(--tui-bg); color: inherit;
-              border: 1px solid var(--box-border); border-radius: 8px; font-family: ui-monospace, monospace; font-size: 13px; }
-    .db-actions { display: flex; align-items: center; gap: 0.75rem; margin: 0.5rem 0; }
-    .db-status { color: var(--text-muted); font-size: 0.85em; }
-    .db-status.error { color: var(--error-text); }
-    .db-status.ok { color: var(--success-text); }
-    .button.danger { border-color: var(--error-text); color: var(--error-text); }
-    .db-danger-banner { margin: 0.5rem 0; padding: 0.5rem 0.7rem; border: 1px solid var(--error-text);
-                        border-radius: 8px; color: var(--error-text); font-size: 0.85em; }
-    .db-error { margin: 0.5rem 0; padding: 0.5rem 0.7rem; border: 1px solid var(--error-text); border-radius: 8px; }
-    .db-error-label { font-weight: 700; color: var(--error-text); }
-    .db-error-body { margin: 0.3rem 0 0; white-space: pre-wrap; word-break: break-word; font-size: 12px; }
-    .db-result-meta { color: var(--text-muted); font-size: 0.8em; margin: 0.5rem 0 0.3rem; }
-    .db-result-scroll { overflow: auto; max-height: 55vh; border: 1px solid var(--box-border); border-radius: 8px; }
-    .db-result { width: 100%; border-collapse: collapse; font-size: 12px; }
-    .db-result th, .db-result td { text-align: left; padding: 0.25rem 0.5rem; border-bottom: 1px solid var(--box-border);
-                                   white-space: nowrap; }
-    .toggle-label { display: inline-flex; align-items: center; gap: 0.4rem; cursor: pointer; font-size: 0.85em; }
-    .muted { color: var(--text-muted); }
-    @media (max-width: 720px) { .db-grid { grid-template-columns: 1fr; } }
-</style>
+{% block head %}
+<link rel="stylesheet" href="/static/css/pages/database.css">
 {% endblock %}
 
 {% block content %}
-<div class="admin-page-header">
-    <h1>Database</h1>
-    <p class="admin-page-sub">Browse and query <code>{{ db_name }}.db</code> · {{ db_size }}</p>
+<div class="page-head">
+    <div class="page-head-text">
+        <h1>Database</h1>
+        <p class="page-sub">Browse and query Vantage's own database.</p>
+    </div>
+    <div class="page-actions">
+        <span class="chip mono" title="The database file backing this console">
+            <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#database"/></svg>
+            {{ db_name }}.db · {{ db_size }}
+        </span>
+    </div>
 </div>
 
 <div class="db-grid">
-    {# ─── Tables list ──────────────────────────────────────────── #}
-    <section class="db-panel">
-        <h2>Tables</h2>
-        <table class="db-table" id="db-tables">
-            <thead>
-                <tr><th>Name</th><th class="numeric">Rows</th><th></th></tr>
-            </thead>
-            <tbody><tr><td colspan="3" class="muted">Loading…</td></tr></tbody>
-        </table>
+    <section class="db-side">
+        <div class="section-head">
+            <h2>Tables</h2>
+            <span class="count-badge" id="table-count">0</span>
+        </div>
+        <div class="card">
+            <div class="card-body flush">
+                <div class="table-wrap">
+                    <table class="table" id="tables">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th class="num">Rows</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tables-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
     </section>
 
-    {# ─── Query runner ─────────────────────────────────────────── #}
-    <section class="db-panel">
-        <div class="db-runner-head">
+    <section class="db-main">
+        <div class="section-head">
             <h2>Query</h2>
-            <label class="toggle-label" title="Run the query in read-only mode">
+            <div class="spacer"></div>
+            {#
+                Safe mode is a switch, and it is on. Turning it off is a
+                deliberate act that database.js confirms before the first
+                unguarded query — the old page's checkbox could be unticked in
+                passing, next to a Run button, with nothing in between.
+            #}
+            <label class="switch" id="safe-wrap">
                 <input type="checkbox" id="safe-mode" checked>
-                <span>Safe mode</span>
+                <span class="switch-track"></span>
+                <span class="switch-label">Safe mode</span>
             </label>
         </div>
 
-        <textarea id="sql-input" class="db-sql" spellcheck="false" autocomplete="off"
-                  placeholder="SELECT 1;">SELECT name FROM sqlite_master WHERE type='table';</textarea>
+        <div class="card">
+            <div class="card-body flush">
+                <label class="sr-only" for="sql">SQL query</label>
+                <textarea class="textarea mono db-sql" id="sql" spellcheck="false" autocomplete="off"
+                          rows="6">SELECT name FROM sqlite_master WHERE type='table';</textarea>
+            </div>
 
-        <div class="db-actions">
-            <button class="button" id="run-btn">Run</button>
-            <span class="db-status" id="db-status"></span>
+            <div class="card-footer db-run-bar">
+                <button class="btn" id="run-btn" type="button">
+                    <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#play"/></svg>
+                    Run
+                </button>
+                <span class="kbd">Ctrl ↵</span>
+                <div class="spacer"></div>
+                <span class="db-meta" id="meta"></span>
+            </div>
         </div>
 
-        <div class="db-error" id="db-error" hidden>
-            <span class="db-error-label">Error</span>
-            <pre class="db-error-body" id="db-error-body"></pre>
+        <div class="callout danger" id="danger-banner" hidden>
+            <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#triangle-alert"/></svg>
+            <div class="callout-body">
+                <strong>Safe mode is off.</strong>
+                Queries now run on a read/write connection. A <code>DELETE</code>, <code>DROP</code> or
+                <code>UPDATE</code> will change Vantage's own data, and nothing here will ask twice.
+            </div>
         </div>
 
-        <div class="db-result-meta" id="db-result-meta"></div>
-        <div class="db-result-scroll">
-            <table class="db-result" id="db-result">
-                <thead><tr><th class="muted">No results yet</th></tr></thead>
-                <tbody></tbody>
-            </table>
+        <div id="error"></div>
+
+        <div class="card" id="result-card">
+            <div class="card-body flush">
+                <div class="table-wrap db-result-scroll">
+                    <table class="table" id="result">
+                        <thead id="result-head"></thead>
+                        <tbody id="result-body"></tbody>
+                    </table>
+                </div>
+            </div>
         </div>
     </section>
 </div>
+{% endblock %}
 
-<script src="/static/js/db.js" defer></script>
+{% block scripts %}
+<script type="module" src="/static/js/pages/database.js"></script>
 {% endblock %}

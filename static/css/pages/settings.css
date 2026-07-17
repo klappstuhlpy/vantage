@@ -1,0 +1,21 @@
+/* Settings page — a stack of setting cards over one shared Save.
+ *
+ * Composition only; the cards, fields and buttons are components. The whole
+ * page is one <form>, so a single Save commits every card at once rather than
+ * scattering a button onto each.
+ */
+
+@layer pages {
+  .settings-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-5);
+  }
+
+  .settings-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-4);
+    flex-wrap: wrap;
+  }
+}

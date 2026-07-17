@@ -1,36 +1,57 @@
 {% extends "layout.html" %}
 
-{% block title %}Dashboard | Vantage{% endblock %}
+{% block title %}Overview | Vantage{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="/static/vendor/uplot.min.css">
+<link rel="stylesheet" href="/static/css/pages/dashboard.css">
+{% endblock %}
 
 {% block content %}
-<div class="admin-page-header">
-    <h1>Dashboard</h1>
-    <p class="admin-page-sub">At a glance — the host overview.</p>
+<div class="page-head">
+    <div class="page-head-text">
+        <h1>Overview</h1>
+        <p class="page-sub">
+            {{ service_count }} services · {{ monitor_count }} monitors{% if monitors_down > 0 %},
+            <strong class="text-down">{{ monitors_down }} down</strong>{% else if monitor_count > 0 %},
+            {{ monitors_up }} up{% endif %} · {{ proxy_route_count }} proxy routes
+        </p>
+    </div>
+    <div class="page-actions">
+        {#
+            Edit mode adds no chrome until it is asked for: the dashboard's job
+            is to be read at a glance, not to advertise that it can be
+            rearranged. These two appear only once editing starts.
+        #}
+        <button class="btn quiet" id="gallery-btn" type="button" hidden>
+            <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#plus"/></svg>
+            Add widget
+        </button>
+        <button class="btn quiet" id="reset-btn" type="button" hidden>
+            <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#list-restart"/></svg>
+            Reset
+        </button>
+        <button class="btn outline" id="edit-toggle" type="button" aria-pressed="false">
+            <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#layout-grid"/></svg>
+            <span id="edit-toggle-label">Edit layout</span>
+        </button>
+    </div>
 </div>
 
-<section class="admin-section">
-    <div class="dash-tiles">
-        <a href="/docker" class="dash-tile">
-            <span class="dash-tile-value">{{ service_count }}</span>
-            <span class="dash-tile-label">Services</span>
-            {% if !docker_available %}<span class="dash-tile-note">Docker unavailable</span>{% endif %}
-        </a>
-        <a href="/monitors" class="dash-tile">
-            <span class="dash-tile-value">{{ monitor_count }}</span>
-            <span class="dash-tile-label">Monitors</span>
-            {% if monitors_up > 0 || monitors_down > 0 %}
-            <span class="dash-tile-note">{{ monitors_up }} up{% if monitors_down > 0 %} · {{ monitors_down }} down{% endif %}</span>
-            {% endif %}
-        </a>
-        <a href="/proxy" class="dash-tile">
-            <span class="dash-tile-value">{{ proxy_route_count }}</span>
-            <span class="dash-tile-label">Proxy routes</span>
-        </a>
-        <a href="/metrics" class="dash-tile">
-            <span class="dash-tile-value">—</span>
-            <span class="dash-tile-label">Metrics</span>
-            <span class="dash-tile-note">Live charts</span>
-        </a>
-    </div>
-</section>
+{#
+    Capability flags ride on the grid as data attributes rather than an inline
+    <script>: this app ships zero inline JS, so a strict CSP needs no nonce
+    pipeline. The frontend reads them to render a widget's degraded state
+    without firing a request it knows will 503.
+#}
+<div class="widget-grid"
+     id="widget-grid"
+     data-docker="{{ docker_available }}"
+     data-firewall="{{ firewall_available }}">
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/vendor/uplot.iife.min.js"></script>
+<script type="module" src="/static/js/pages/dashboard.js"></script>
 {% endblock %}

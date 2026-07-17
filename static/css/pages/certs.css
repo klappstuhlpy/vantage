@@ -1,0 +1,63 @@
+/* Certificates page — composition only. Server-rendered; no page JS. */
+
+@layer pages {
+  .domain {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-2);
+    font-family: var(--font-mono);
+    font-size: var(--fs-sm);
+    color: var(--ink-1);
+    text-decoration: none;
+  }
+
+  .domain:hover {
+    color: var(--acc);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  .domain .icon {
+    width: 12px;
+    height: 12px;
+    color: var(--ink-3);
+  }
+
+  .domain:hover .icon {
+    color: var(--acc);
+  }
+
+  /* A secondary fact riding along in the same cell — a container name, the
+     monitor that produced an expiry. */
+  .sub {
+    margin-left: var(--sp-2);
+    font-family: var(--font-sans);
+    font-size: var(--fs-xs);
+    color: var(--ink-3);
+  }
+
+  .muted {
+    font-size: var(--fs-sm);
+    color: var(--ink-3);
+  }
+
+  /* A disabled route is still real and still has a certificate that expires, so
+     it stays legible: this dims the row's *chrome*, not its text. Text keeps
+     --ink-2 (4.5:1) rather than an opacity that would drag it below the floor —
+     the old page put `opacity: .55` on the whole <tr>. */
+  tr.is-disabled td {
+    color: var(--ink-2);
+  }
+
+  tr.is-disabled .domain {
+    color: var(--ink-2);
+  }
+
+  tr.is-disabled .pill {
+    opacity: 0.8;
+  }
+
+  td .pill + .pill {
+    margin-left: var(--sp-1);
+  }
+}

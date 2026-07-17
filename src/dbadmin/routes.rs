@@ -1,16 +1,13 @@
 //! `/database` routes — browse Vantage's own `admin.db` and run
 //! ad-hoc queries against it behind a safe-mode gate.
 //!
-//! Every query is logged with the acting admin and source IP. (The structured
-//! audit trail is a Seam that arrives with the audit slice; until then these
-//! land in the rolling application log via `tracing`, tagged `database.query*`
-//! so the action names stay stable when the audit backend moves in.)
-
-use std::net::SocketAddr;
+//! Every query is recorded to the audit log with the acting admin, their
+//! address, and a bounded snippet of the SQL — including the ones safe-mode
+//! refused, which are the interesting ones.
 
 use askama::Template;
 use axum::{
-    extract::{ConnectInfo, State},
+    extract::State,
     http::StatusCode,
     response::Json,
     routing::{get, post},
@@ -18,6 +15,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::audit;
 use crate::dbadmin;
 use crate::session::Account;
 use crate::AppState;
@@ -95,7 +93,6 @@ struct RunQuery {
 
 async fn run_query(
     State(state): State<AppState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     account: Account,
     Form(payload): Form<RunQuery>,
 ) -> Result<Json<dbadmin::QueryResult>, (StatusCode, Json<ApiError>)> {
@@ -105,13 +102,11 @@ async fn run_query(
 
     let safe = !payload.danger_mode;
     if safe && !dbadmin::is_safe_query(&payload.sql) {
-        tracing::warn!(
-            actor = %account.name,
-            ip = %peer.ip(),
-            action = "database.query.blocked",
-            sql = %snippet(&payload.sql),
-            "blocked a non-read query in safe-mode",
-        );
+        audit::event("database.query.blocked", &account)
+            .detail(serde_json::json!({ "sql": snippet(&payload.sql) }))
+            .failed()
+            .record(&state.db)
+            .await;
         return Err((
             StatusCode::FORBIDDEN,
             Json(ApiError {
@@ -123,25 +118,28 @@ async fn run_query(
 
     let outcome = dbadmin::run_query(state.db_path.as_ref().clone(), &payload.sql, safe).await;
     match &outcome {
-        Ok(qr) => tracing::info!(
-            actor = %account.name,
-            ip = %peer.ip(),
-            action = "database.query",
-            danger_mode = payload.danger_mode,
-            rows = qr.row_count,
-            elapsed_ms = qr.elapsed_ms,
-            sql = %snippet(&payload.sql),
-            "ran an admin query",
-        ),
-        Err(e) => tracing::warn!(
-            actor = %account.name,
-            ip = %peer.ip(),
-            action = "database.query.error",
-            danger_mode = payload.danger_mode,
-            error = %e,
-            sql = %snippet(&payload.sql),
-            "admin query failed",
-        ),
+        Ok(qr) => {
+            audit::event("database.query", &account)
+                .detail(serde_json::json!({
+                    "danger_mode": payload.danger_mode,
+                    "rows": qr.row_count,
+                    "elapsed_ms": qr.elapsed_ms,
+                    "sql": snippet(&payload.sql),
+                }))
+                .record(&state.db)
+                .await
+        }
+        Err(e) => {
+            audit::event("database.query.error", &account)
+                .detail(serde_json::json!({
+                    "danger_mode": payload.danger_mode,
+                    "error": e.to_string(),
+                    "sql": snippet(&payload.sql),
+                }))
+                .failed()
+                .record(&state.db)
+                .await
+        }
     }
 
     outcome.map(Json).map_err(query_error)

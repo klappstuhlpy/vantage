@@ -1,0 +1,96 @@
+{% extends "layout.html" %}
+
+{% block title %}Scripts | Vantage{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="/static/css/pages/scripts.css">
+{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div class="page-head-text">
+        <h1>Scripts</h1>
+        <p class="page-sub">
+            The commands Vantage runs for you — on a schedule, or when you press the button.
+        </p>
+    </div>
+</div>
+
+<noscript>
+    <div class="callout warn">
+        <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#triangle-alert"/></svg>
+        <div class="callout-body">This page needs JavaScript to list your scripts and their run history.</div>
+    </div>
+</noscript>
+
+{% if !any_scripts %}
+{#
+    Nothing to list, so the page's whole job is to explain what would fill it.
+    A worked example beats a key name: the shape of `spotlight_scripts` (an id,
+    and an optional cron field that turns a command into automation) is the
+    thing that isn't guessable.
+#}
+<div class="callout">
+    <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#info"/></svg>
+    <div class="callout-body">
+        <strong>No scripts are configured.</strong>
+        Scripts are declared under <code>spotlight_scripts</code> in <code>config.json</code> and
+        run as the Vantage user. Give one a <code>schedule</code> and it becomes automation; leave
+        it out and it only ever runs when you press Run.
+        <pre class="config-example"><code>"spotlight_scripts": [
+  {
+    "id": "nightly-restic",
+    "name": "Nightly backup",
+    "description": "Push /srv to the restic repository.",
+    "command": "restic backup /srv",
+    "schedule": "30 3 * * *"
+  }
+]</code></pre>
+    </div>
+</div>
+{% endif %}
+
+<section>
+    <div class="section-head">
+        <h2>Scripts</h2>
+    </div>
+    <div id="scripts" class="script-list"></div>
+    <p class="section-note">
+        Scripts can't be added or edited from here — the list comes from <code>config.json</code>
+        and nowhere else. An endpoint that could write a new command line would be a remote shell
+        with extra steps, and that is not a thing a control plane should own.
+    </p>
+</section>
+
+<section>
+    <div class="section-head">
+        <h2>Recent runs</h2>
+        <span class="count-badge" id="run-count">0</span>
+    </div>
+    <div class="card">
+        <div class="card-body flush">
+            <div class="table-wrap">
+                <table class="table" id="runs">
+                    <thead>
+                        <tr>
+                            <th>Started</th>
+                            <th>Script</th>
+                            <th>Trigger</th>
+                            <th>Took</th>
+                            <th>Result</th>
+                        </tr>
+                    </thead>
+                    <tbody id="runs-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <p class="section-note">
+        The last 50 runs, scheduled and manual alike. Select one to read its output.
+    </p>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/js/pages/scripts.js"></script>
+{% endblock %}

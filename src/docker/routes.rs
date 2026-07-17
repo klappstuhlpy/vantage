@@ -20,8 +20,8 @@
 //!
 //! One thing is deliberately **not** here yet: image-update checking (the "Pull"
 //! hint / update badge — it arrives with the updates slice). Container inspect
-//! and log-stream opens can expose env vars and secrets, so both are logged to
-//! `tracing` rather than swallowed.
+//! and log-stream opens can expose env vars and secrets, so both are recorded to
+//! the audit log rather than swallowed.
 
 use std::convert::Infallible;
 
@@ -42,6 +42,7 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
+use crate::audit;
 use crate::metrics::docker::DockerStat;
 use crate::session::Account;
 use crate::AppState;
@@ -372,11 +373,20 @@ async fn service_action(State(state): State<AppState>, account: Account, Form(da
             .into_response();
     }
 
-    // State-changing privileged host op — logged (the audit slice wires this
-    // action name into the audit trail later; keep it stable).
-    tracing::info!(actor = %account.name, target = %data.name, action = %data.action, "service.action");
-
     let (success, output) = perform_action(cfg.path.as_deref(), &cfg.identifier, &data.action).await;
+
+    // A state-changing privileged host op. Audited *after* the fact, with its
+    // outcome: the old line was emitted before the action ran, so the log
+    // recorded intent and called it history — a restart that failed left a
+    // record indistinguishable from one that worked. The verb is a detail rather
+    // than part of the action name so that "what happened to this container?"
+    // is one filter instead of five.
+    audit::event("docker.service.action", &account)
+        .target(&data.name)
+        .detail(serde_json::json!({ "action": data.action, "container": cfg.identifier }))
+        .ok(success)
+        .record(&state.db)
+        .await;
 
     // State changed — drop the cached container/network/volume lists so the graph
     // and live data reflect the new reality immediately.
@@ -498,9 +508,14 @@ async fn container_logs_sse(
         .cloned()
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    // Log once per stream-open. Container logs can include secrets and request
-    // bodies, so this is a privileged read.
-    tracing::info!(actor = %account.name, target = %format!("service:{name} → {}", cfg.identifier), "docker.container.logs.open");
+    // Audited once per stream-open. Container logs can include secrets and
+    // request bodies, so this is a privileged read — the audit log records the
+    // reads that hand someone a credential, not just the writes.
+    audit::event("docker.container.logs.open", &account)
+        .target(&name)
+        .detail(serde_json::json!({ "container": cfg.identifier }))
+        .record(&state.db)
+        .await;
 
     type LogStream = std::pin::Pin<Box<dyn futures_util::Stream<Item = Result<Event, Infallible>> + Send>>;
 
@@ -582,8 +597,12 @@ async fn inspect_container(State(state): State<AppState>, account: Account, Path
     match docker.inspect(&id).await {
         Ok(info) => {
             // Inspect dumps env vars, mounts, and command line — those routinely
-            // contain credentials. Log reads.
-            tracing::info!(actor = %account.name, target = %id, "docker.container.inspect");
+            // contain credentials, so the read is audited like any other way of
+            // getting a secret out of this host.
+            audit::event("docker.container.inspect", &account)
+                .target(&id)
+                .record(&state.db)
+                .await;
             Json(info).into_response()
         }
         Err(e) => {
@@ -751,7 +770,14 @@ async fn create_snapshot(
 
     match insert {
         Ok(_) => {
-            tracing::info!(actor = %account.name, target = %snapshot_tag, "docker.snapshot.create");
+            audit::event("docker.snapshot.create", &account)
+                .target(&snapshot_tag)
+                .detail(serde_json::json!({
+                    "container": payload.container_name,
+                    "image": payload.image,
+                }))
+                .record(&state.db)
+                .await;
             Json(serde_json::json!({ "snapshot_tag": snapshot_tag })).into_response()
         }
         Err(e) => {
@@ -772,12 +798,19 @@ struct RestorePayload {
     name: String,
 }
 
+/// Restores a container from a snapshot.
+///
+/// Sudo-gated: this replaces a running service with an image captured at some
+/// earlier point, and there is no undo — the thing it overwrote is gone. Routine
+/// container actions (start, restart, pull) are not gated; being reversible is
+/// exactly the difference.
 async fn restore_snapshot(
     State(state): State<AppState>,
-    account: Account,
+    sudo: crate::account::routes::Sudo,
     Path(id): Path<i64>,
     Json(payload): Json<RestorePayload>,
 ) -> Response {
+    let account = sudo.account;
     if !account.is_admin() {
         return StatusCode::FORBIDDEN.into_response();
     }
@@ -821,7 +854,11 @@ async fn restore_snapshot(
 
     match docker.run_snapshot(&snap.snapshot_tag, &name).await {
         Ok(container_id) => {
-            tracing::info!(actor = %account.name, target = %format!("{} → {name}", snap.snapshot_tag), "docker.snapshot.restore");
+            audit::event("docker.snapshot.restore", &account)
+                .target(&snap.snapshot_tag)
+                .detail(serde_json::json!({ "restored_as": name, "container_id": container_id }))
+                .record(&state.db)
+                .await;
             Json(serde_json::json!({ "container_id": container_id })).into_response()
         }
         Err(e) => {
@@ -881,7 +918,10 @@ async fn delete_snapshot(State(state): State<AppState>, account: Account, Path(i
 
     match del {
         Ok(_) => {
-            tracing::info!(actor = %account.name, target = %tag, "docker.snapshot.delete");
+            audit::event("docker.snapshot.delete", &account)
+                .target(&tag)
+                .record(&state.db)
+                .await;
             StatusCode::NO_CONTENT.into_response()
         }
         Err(e) => (

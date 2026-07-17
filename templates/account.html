@@ -1,0 +1,302 @@
+{% extends "layout.html" %}
+
+{% block title %}Account | Vantage{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="/static/css/pages/account.css">
+{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div class="page-head-text">
+        <h1>Account &amp; security</h1>
+        <p class="page-sub">
+            Your credentials for this host, and every session that currently holds them.
+        </p>
+    </div>
+</div>
+
+<noscript>
+    <div class="callout warn">
+        <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#triangle-alert"/></svg>
+        <div class="callout-body">This page needs JavaScript to change your credentials or list your sessions.</div>
+    </div>
+</noscript>
+
+{#
+    Everything on this page is sudo-gated server-side, so the first action of a
+    visit raises the re-authentication modal. That is stated up front rather than
+    sprung on you mid-form.
+#}
+<div class="callout info sudo-note">
+    <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#lock"/></svg>
+    <div class="callout-body">
+        Changing anything here asks for your password first. That confirmation lasts
+        {{ sudo_window_minutes }} minutes and covers this browser only.
+    </div>
+</div>
+
+{# ─── Password ────────────────────────────────────────────────────── #}
+<section>
+    <div class="section-head">
+        <h2>Password</h2>
+    </div>
+    <div class="card">
+        <div class="card-body">
+            <form id="password-form" class="stack" autocomplete="off">
+                <div class="field">
+                    <label for="new-password">New password</label>
+                    {#
+                        `new-password` (not `off`) is what actually stops a browser
+                        pasting the *current* password in here, and it is what lets a
+                        password manager offer to generate and then save one. "off" is
+                        widely ignored by browsers for password fields.
+                    #}
+                    <input class="input" id="new-password" type="password" required
+                           autocomplete="new-password" minlength="{{ min_password_len }}">
+                    <span class="field-hint">
+                        At least {{ min_password_len }} characters. Length is the only rule —
+                        a long passphrase beats a short one with punctuation in it.
+                    </span>
+                </div>
+
+                <div class="field">
+                    <label for="confirm-password">Confirm new password</label>
+                    <input class="input" id="confirm-password" type="password" required
+                           autocomplete="new-password">
+                    <span class="field-error" id="password-error" hidden></span>
+                </div>
+
+                <div class="form-actions">
+                    <button class="btn" type="submit" id="password-save">Change password</button>
+                    <span class="form-note">Signs out every other session.</span>
+                </div>
+            </form>
+        </div>
+    </div>
+</section>
+
+{# ─── Two-factor ──────────────────────────────────────────────────── #}
+<section>
+    <div class="section-head">
+        <h2>Two-factor authentication</h2>
+    </div>
+    <div class="card">
+        <div class="card-body">
+            <div class="setting">
+                <div class="setting-text">
+                    <div class="setting-title">
+                        Authenticator app
+                        {% if totp_enabled %}
+                        <span class="pill ok">on</span>
+                        {% else %}
+                        <span class="pill idle">off</span>
+                        {% endif %}
+                    </div>
+                    <p class="setting-sub">
+                        {% if totp_enabled %}
+                        Signing in asks for a six-digit code from your authenticator after your password.
+                        {% else %}
+                        A stolen password alone gets no further than the code prompt. This is the single
+                        most useful thing on this page.
+                        {% endif %}
+                    </p>
+                </div>
+                <div class="setting-action">
+                    {% if totp_enabled %}
+                    <button class="btn danger" type="button" id="totp-disable">Turn off</button>
+                    {% else %}
+                    <button class="btn" type="button" id="totp-enable">
+                        <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#shield-check"/></svg>
+                        Set up
+                    </button>
+                    {% endif %}
+                </div>
+            </div>
+
+            {% if totp_enabled %}
+            <hr class="setting-rule">
+
+            <div class="setting">
+                <div class="setting-text">
+                    <div class="setting-title">
+                        Recovery codes
+                        {% if recovery_remaining == 0 %}
+                        <span class="pill down">none left</span>
+                        {% else %}
+                        <span class="pill {% if recovery_remaining <= 2 %}warn{% else %}idle{% endif %}">
+                            {{ recovery_remaining }} of {{ recovery_total }} left
+                        </span>
+                        {% endif %}
+                    </div>
+                    <p class="setting-sub">
+                        Each code signs you in once when your authenticator isn't available. Generating a
+                        new batch invalidates the old one.
+                    </p>
+                </div>
+                <div class="setting-action">
+                    <button class="btn quiet" type="button" id="recovery-regen">
+                        <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#refresh-cw"/></svg>
+                        New codes
+                    </button>
+                </div>
+            </div>
+
+            {% if recovery_remaining == 0 %}
+            <div class="callout warn">
+                <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#triangle-alert"/></svg>
+                <div class="callout-body">
+                    You have no recovery codes left. If you lose your authenticator now, there is no way
+                    back into this account short of the <code>vantage admin</code> CLI on the host itself.
+                </div>
+            </div>
+            {% endif %}
+            {% endif %}
+        </div>
+    </div>
+</section>
+
+{# ─── Passkeys ────────────────────────────────────────────────────── #}
+<section>
+    <div class="section-head">
+        <h2>Passkeys</h2>
+    </div>
+    <div class="card">
+        <div class="card-body">
+            {% if passkeys_available %}
+            <div id="passkeys"></div>
+            {% else %}
+            {#
+                A stated placeholder, not a disabled button: a greyed-out "Add
+                passkey" reads as "temporarily broken" and invites clicking.
+                WebAuthn is not wired into the shared kernel yet; when it is, this
+                branch goes and the section becomes real.
+            #}
+            <div class="empty">
+                <span class="empty-icon">
+                    <svg class="icon icon-20" aria-hidden="true"><use href="/static/icons/sprite.svg#fingerprint"/></svg>
+                </span>
+                <span class="empty-title">Not available in this build</span>
+                <p class="empty-sub">
+                    Signing in with a security key or your device's biometrics is planned. Until it
+                    lands, an authenticator app is the second factor Vantage supports.
+                </p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</section>
+
+{# ─── Sessions ────────────────────────────────────────────────────── #}
+<section>
+    <div class="section-head">
+        <h2>Sessions</h2>
+        <span class="count-badge" id="session-count">0</span>
+        <div class="spacer"></div>
+        <button class="btn sm danger" type="button" id="revoke-all">
+            <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#log-out"/></svg>
+            Sign out everywhere else
+        </button>
+    </div>
+    <div class="card">
+        <div class="card-body flush">
+            <div class="table-wrap">
+                <table class="table" id="sessions">
+                    <thead>
+                        <tr>
+                            <th>Device</th>
+                            <th>Address</th>
+                            <th>Signed in</th>
+                            <th>Last seen</th>
+                            <th class="actions"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="sessions-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <p class="section-note">
+        Sessions expire on their own after 12 hours. Revoking one takes effect immediately —
+        the next request that browser makes lands on the sign-in page.
+    </p>
+</section>
+
+{# ─── Enrollment ──────────────────────────────────────────────────── #}
+<dialog class="modal" id="totp-enroll">
+    <form id="totp-form" autocomplete="off">
+        <div class="modal-header">
+            <span class="modal-title">Set up your authenticator</span>
+            <button class="btn sm ghost icon-only" type="button" data-close aria-label="Close">
+                <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#x"/></svg>
+            </button>
+        </div>
+
+        <div class="modal-body">
+            <ol class="steps">
+                <li>
+                    <span class="step-text">Scan this with your authenticator app.</span>
+                    {# Filled by account.js from the server's module matrix. #}
+                    <div class="qr" id="qr" role="img" aria-label="Enrollment QR code"></div>
+                    <details class="manual">
+                        <summary>Can't scan it?</summary>
+                        <p class="manual-sub">Enter this key into the app by hand:</p>
+                        <div class="token-box">
+                            <code class="token-value" id="totp-secret"></code>
+                            <button class="btn sm" type="button" id="secret-copy">
+                                <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#copy"/></svg>
+                                Copy
+                            </button>
+                        </div>
+                    </details>
+                </li>
+                <li>
+                    <span class="step-text">Enter the six-digit code it shows.</span>
+                    <div class="field">
+                        <label class="sr-only" for="totp-code">Six-digit code</label>
+                        <input class="input code-input" id="totp-code" required data-autofocus
+                               inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}"
+                               maxlength="6" placeholder="000000" spellcheck="false">
+                        <span class="field-error" id="totp-error" hidden></span>
+                    </div>
+                </li>
+            </ol>
+        </div>
+
+        <div class="modal-footer">
+            <button class="btn quiet" type="button" data-close>Cancel</button>
+            <button class="btn" type="submit" id="totp-verify">Verify and turn on</button>
+        </div>
+    </form>
+</dialog>
+
+{# ─── The one-time recovery-code reveal ───────────────────────────── #}
+<dialog class="modal" id="recovery-reveal">
+    <div class="modal-header">
+        <span class="modal-title">Save your recovery codes</span>
+    </div>
+    <div class="modal-body">
+        <p class="modal-desc">
+            Each code works once, in place of your authenticator. Vantage stores only their hashes,
+            so this is the only time they can be shown. Keep them somewhere that is not this machine
+            and not the device holding your authenticator.
+        </p>
+        <ul class="codes" id="codes"></ul>
+    </div>
+    <div class="modal-footer">
+        <button class="btn quiet" type="button" id="codes-copy">
+            <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#copy"/></svg>
+            Copy all
+        </button>
+        <button class="btn quiet" type="button" id="codes-download">
+            <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#download"/></svg>
+            Download
+        </button>
+        <button class="btn" type="button" data-close data-autofocus>I've saved them</button>
+    </div>
+</dialog>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/js/pages/account.js"></script>
+{% endblock %}

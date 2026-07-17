@@ -1,0 +1,53 @@
+{% extends "auth.html" %}
+
+{% block title %}Two-factor{% endblock %}
+{% block heading %}Two-factor{% endblock %}
+{% block intro %}Enter the current code from your authenticator app.{% endblock %}
+
+{% block form %}
+<form method="post" action="/login/2fa" class="auth-form">
+    <div class="field">
+        <label for="code">Authenticator code</label>
+        {#
+            inputmode=numeric brings up the digit keypad on a phone without
+            type=number's spinners and scroll-to-change. autocomplete=one-time-code
+            lets iOS and Android offer the code straight from the notification.
+        #}
+        <input class="input mono code-input" id="code" name="code" inputmode="numeric" pattern="[0-9]*"
+               autocomplete="one-time-code" maxlength="6" autofocus required
+               aria-describedby="code-hint">
+        <span class="field-hint" id="code-hint">Six digits. It changes every 30 seconds.</span>
+    </div>
+
+    <button class="btn block lg" type="submit">Verify</button>
+</form>
+
+{#
+    A recovery code goes to the same endpoint, in the same `code` field — the
+    handler tries it as a TOTP code first and then as a recovery code. It gets its
+    own form rather than sharing the one above because the two inputs want
+    opposite treatment: six digits want a numeric keypad, `pattern=[0-9]*` and
+    maxlength=6, all three of which make a recovery code literally unenterable.
+    (They did exactly that until this was noticed.)
+
+    A <details> rather than a JS toggle, because this is the page you are on when
+    something has already gone wrong, and it is the one door into the app. It must
+    not depend on a script loading.
+#}
+<details class="auth-alt">
+    <summary>Lost your authenticator?</summary>
+    <form method="post" action="/login/2fa" class="auth-form">
+        <div class="field">
+            <label for="recovery">Recovery code</label>
+            <input class="input mono" id="recovery" name="code" maxlength="11" required
+                   autocomplete="off" spellcheck="false" placeholder="XXXXX-XXXXX"
+                   aria-describedby="recovery-hint">
+            <span class="field-hint" id="recovery-hint">
+                One of the codes you saved when you turned two-factor on. Each works once.
+            </span>
+        </div>
+
+        <button class="btn block quiet" type="submit">Use recovery code</button>
+    </form>
+</details>
+{% endblock %}

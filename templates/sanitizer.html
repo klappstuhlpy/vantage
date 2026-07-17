@@ -1,74 +1,103 @@
 {% extends "layout.html" %}
 
-{% block title %}File Sanitizer | Vantage{% endblock %}
+{% block title %}Sanitizer | Vantage{% endblock %}
 
-{% block head_css %}
-<link rel="stylesheet" href="/static/css/sanitizer.css">
+{% block head %}
+<link rel="stylesheet" href="/static/css/pages/sanitizer.css">
 {% endblock %}
 
 {% block content %}
-<div class="admin-page-header">
-    <h1>File Sanitizer</h1>
-    <div class="san-badges">
-        {% if clamav_enabled %}
-        <span class="chip san-backend active">ClamAV</span>
-        {% else %}
-        <span class="chip san-backend">ClamAV</span>
-        {% endif %}
-        {% if vt_enabled %}
-        <span class="chip san-backend active">VirusTotal</span>
-        {% else %}
-        <span class="chip san-backend">VirusTotal</span>
-        {% endif %}
+<div class="page-head">
+    <div class="page-head-text">
+        <h1>Sanitizer</h1>
+        <p class="page-sub">Check a file against ClamAV and VirusTotal before you trust it. The file itself is never stored — only its hash and the verdict.</p>
+    </div>
+    <div class="page-actions">
+        {#
+            Backends are named with their state in text, not by colour alone: an
+            "on" chip and an "off" chip differing only in hue is exactly the
+            failure WCAG 1.4.1 is about.
+        #}
+        <span class="chip{% if clamav_enabled %} acc{% endif %}">
+            <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#{% if clamav_enabled %}circle-check{% else %}circle-dashed{% endif %}"/></svg>
+            ClamAV {% if clamav_enabled %}ready{% else %}off{% endif %}
+        </span>
+        <span class="chip{% if vt_enabled %} acc{% endif %}">
+            <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#{% if vt_enabled %}circle-check{% else %}circle-dashed{% endif %}"/></svg>
+            VirusTotal {% if vt_enabled %}ready{% else %}off{% endif %}
+        </span>
     </div>
 </div>
 
 {% if !clamav_enabled && !vt_enabled %}
-<div class="san-notice">
-    No scan backends configured. Set <code>clamav_addr</code> or
-    <code>virustotal_api_key</code> in your config to enable scanning.
-    File hashes are still recorded when you upload.
+<div class="callout warn">
+    <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#triangle-alert"/></svg>
+    <div class="callout-body">
+        <strong>No scanner is configured — nothing will actually be checked.</strong>
+        Uploads are still hashed and recorded, but a file will come back with no verdict,
+        which is not the same as coming back clean. Set <code>clamav_addr</code> or
+        <code>virustotal_api_key</code> in <code>config.json</code> to enable scanning.
+    </div>
 </div>
 {% endif %}
 
-<div class="san-drop-zone" id="san-drop-zone">
-    <div class="san-drop-inner">
-        <div class="san-drop-icon">&#x1F4C2;</div>
-        <div class="san-drop-text">Drop a file here or <label for="san-file-input" class="san-browse-link">browse</label></div>
-        <div class="san-drop-hint">Max 16 MB &nbsp;·&nbsp; file bytes are not stored</div>
-        <input type="file" id="san-file-input" class="san-file-hidden">
+<section>
+    {#
+        The drop zone is a <label> wrapping a real file input: dropping and
+        clicking both work, the keyboard reaches it because the input is a real
+        focusable control, and screen readers announce a file input rather than
+        a mystery div. The old zone was a div with a click handler.
+    #}
+    <label class="drop" id="drop">
+        <input type="file" id="file-input" class="drop-input">
+        <span class="drop-icon" aria-hidden="true">
+            <svg class="icon icon-24"><use href="/static/icons/sprite.svg#upload"/></svg>
+        </span>
+        <span class="drop-title">Drop a file here, or <span class="drop-link">browse</span></span>
+        <span class="drop-hint" id="drop-hint">Up to 16 MB</span>
+    </label>
+
+    <div class="progress indeterminate" id="progress" hidden>
+        <div class="progress-bar" id="progress-bar"></div>
     </div>
-</div>
 
-<div id="san-progress" class="san-progress" hidden>
-    <div class="san-progress-bar" id="san-progress-bar"></div>
-</div>
+    <div id="result"></div>
+</section>
 
-<div id="san-result" class="san-result" hidden></div>
+<section>
+    <div class="section-head">
+        <h2>History</h2>
+        <span class="count-badge" id="history-count">0</span>
+        <div class="spacer"></div>
+        <button class="btn quiet sm" id="refresh-btn" type="button">
+            <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#refresh-cw"/></svg>
+            Refresh
+        </button>
+    </div>
 
-<div class="section-header-row" style="margin-top: 2rem;">
-    <h2>Scan History</h2>
-    <button class="button outline small" id="btn-refresh-history">Refresh</button>
-</div>
+    <div class="card">
+        <div class="card-body flush">
+            <div class="table-wrap">
+                <table class="table" id="history">
+                    <thead>
+                        <tr>
+                            <th>File</th>
+                            <th class="num">Size</th>
+                            <th>SHA-256</th>
+                            <th>ClamAV</th>
+                            <th>VirusTotal</th>
+                            <th>Scanned</th>
+                            <th class="actions"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="history-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</section>
+{% endblock %}
 
-<div class="container-table-wrap">
-    <table class="container-table">
-        <thead>
-            <tr>
-                <th>Filename</th>
-                <th>Size</th>
-                <th>SHA-256</th>
-                <th>ClamAV</th>
-                <th>VirusTotal</th>
-                <th>Scanned</th>
-                <th class="col-actions"></th>
-            </tr>
-        </thead>
-        <tbody id="san-tbody">
-            <tr><td colspan="7" class="table-empty">Loading…</td></tr>
-        </tbody>
-    </table>
-</div>
-
-<script src="/static/js/sanitizer.js"></script>
+{% block scripts %}
+<script type="module" src="/static/js/pages/sanitizer.js"></script>
 {% endblock %}

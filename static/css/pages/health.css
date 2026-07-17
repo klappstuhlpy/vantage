@@ -1,0 +1,31 @@
+/* Health page — composition only. */
+
+@layer pages {
+  .monitor-cell {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    min-width: 0;
+  }
+
+  .monitor-name {
+    font-weight: 500;
+    min-width: 0;
+  }
+
+  /* The kind sections swap as the kind select changes; they are stacked fields,
+     not a layout of their own. */
+  .kind-section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-4);
+    padding: var(--sp-4);
+    background: var(--bg-2);
+    border: 1px solid var(--line-1);
+    border-radius: var(--r-s);
+  }
+
+  .kind-section[hidden] {
+    display: none;
+  }
+}

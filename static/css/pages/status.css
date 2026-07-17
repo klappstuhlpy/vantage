@@ -1,0 +1,240 @@
+/* The public status page.
+ *
+ * Standalone: no shell, no components.css — this page loads tokens + base and
+ * nothing else, because it is served to the public and should stay small. It is
+ * the only stylesheet here that redefines its own primitives rather than
+ * composing the design system's. */
+
+@layer pages {
+  .status-body {
+    background: var(--bg-0);
+  }
+
+  .status {
+    max-width: 46rem;
+    margin: 0 auto;
+    padding: var(--sp-7) var(--sp-4) var(--sp-6);
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-5);
+  }
+
+  /* =====================================================================
+     Head
+     ===================================================================== */
+  .status-brand {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    color: var(--acc);
+  }
+
+  .status-brand .scope {
+    width: 20px;
+    height: 20px;
+  }
+
+  .status-brand .scope-ring {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    opacity: 0.9;
+  }
+
+  .status-brand .scope-grid {
+    stroke: currentColor;
+    stroke-width: 1;
+    opacity: 0.35;
+  }
+
+  .status-brand .scope-dot {
+    fill: currentColor;
+  }
+
+  .status-brand-name {
+    font-size: var(--fs-md);
+    font-weight: 600;
+    color: var(--ink-1);
+  }
+
+  /* =====================================================================
+     Banner
+     ===================================================================== */
+  .banner {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-4);
+    padding: var(--sp-5);
+    background: var(--bg-1);
+    border: 1px solid var(--line-2);
+    border-radius: var(--r-l);
+  }
+
+  .banner-icon {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border-radius: var(--r-full);
+  }
+
+  .banner h1 {
+    margin: 0;
+    font-size: var(--fs-xl);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--ink-1);
+  }
+
+  .banner p {
+    margin: 2px 0 0;
+    font-size: var(--fs-sm);
+    color: var(--ink-2);
+  }
+
+  .banner.up {
+    border-color: color-mix(in srgb, var(--ok) 40%, var(--line-2));
+  }
+  .banner.up .banner-icon {
+    background: color-mix(in srgb, var(--ok) 14%, transparent);
+    color: var(--ok);
+  }
+
+  .banner.degraded {
+    border-color: color-mix(in srgb, var(--warn) 45%, var(--line-2));
+  }
+  .banner.degraded .banner-icon {
+    background: color-mix(in srgb, var(--warn) 14%, transparent);
+    color: var(--warn);
+  }
+
+  .banner.down {
+    border-color: color-mix(in srgb, var(--down) 45%, var(--line-2));
+  }
+  .banner.down .banner-icon {
+    background: color-mix(in srgb, var(--down) 14%, transparent);
+    color: var(--down);
+  }
+
+  .banner.unknown .banner-icon {
+    background: var(--bg-2);
+    color: var(--ink-3);
+  }
+
+  /* =====================================================================
+     Services
+     ===================================================================== */
+  .services {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    background: var(--bg-1);
+    border: 1px solid var(--line-1);
+    border-radius: var(--r-l);
+    overflow: hidden;
+  }
+
+  .service {
+    display: grid;
+    grid-template-columns: 8px 1fr auto auto;
+    align-items: center;
+    gap: var(--sp-3);
+    padding: var(--sp-3) var(--sp-4);
+    border-bottom: 1px solid var(--line-1);
+  }
+
+  .service:last-child {
+    border-bottom: 0;
+  }
+
+  .service-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: var(--r-full);
+    background: var(--ink-3);
+  }
+
+  .service.up .service-dot {
+    background: var(--ok);
+  }
+  .service.degraded .service-dot {
+    background: var(--warn);
+  }
+  .service.down .service-dot {
+    background: var(--down);
+  }
+
+  .service-name {
+    font-size: var(--fs-sm);
+    color: var(--ink-1);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .service-uptime {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: var(--fs-xs);
+    color: var(--ink-3);
+  }
+
+  .service-state {
+    min-width: 6.5rem;
+    text-align: right;
+    font-size: var(--fs-xs);
+    font-weight: 500;
+    color: var(--ink-2);
+  }
+
+  .service.up .service-state {
+    color: var(--ok);
+  }
+  .service.degraded .service-state {
+    color: var(--warn);
+  }
+  .service.down .service-state {
+    color: var(--down);
+  }
+
+  /* =====================================================================
+     Empty / foot
+     ===================================================================== */
+  .status-empty {
+    margin: 0;
+    padding: var(--sp-6);
+    background: var(--bg-1);
+    border: 1px solid var(--line-1);
+    border-radius: var(--r-l);
+    text-align: center;
+    font-size: var(--fs-sm);
+    color: var(--ink-3);
+  }
+
+  .status-foot p {
+    margin: 0;
+    font-size: var(--fs-xs);
+    color: var(--ink-3);
+  }
+
+  @media (max-width: 560px) {
+    .status {
+      padding: var(--sp-5) var(--sp-3);
+    }
+
+    /* Drop the uptime figure before the state word: "Down" is what a visitor
+       came to find out; "99.61%" is a detail. */
+    .service {
+      grid-template-columns: 8px 1fr auto;
+    }
+
+    .service-uptime {
+      display: none;
+    }
+
+    .service-state {
+      min-width: 0;
+    }
+  }
+}

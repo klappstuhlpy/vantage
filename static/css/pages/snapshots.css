@@ -1,0 +1,36 @@
+/* Snapshots page — composition only. */
+
+@layer pages {
+  /* The tag is the thing you paste into a docker command, so the whole cell is
+     a copy affordance rather than hiding one behind a hover icon. */
+  .tag-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-2);
+    color: var(--ink-2);
+    transition: color var(--dur-fast) var(--ease-out);
+  }
+
+  .tag-btn .icon {
+    width: 13px;
+    height: 13px;
+    opacity: 0;
+    transition: opacity var(--dur-fast) var(--ease-out);
+  }
+
+  .tag-btn:hover,
+  .tag-btn:focus-visible {
+    color: var(--acc);
+  }
+
+  .tag-btn:hover .icon,
+  .tag-btn:focus-visible .icon {
+    opacity: 1;
+  }
+
+  @media (hover: none) {
+    .tag-btn .icon {
+      opacity: 1;
+    }
+  }
+}

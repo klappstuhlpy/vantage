@@ -10,19 +10,22 @@
 //! - `DELETE /proxy/:id`             remove a route
 //! - `POST   /proxy/import`          import from Cloudflare tunnel
 
+use std::sync::Arc;
+use std::time::Duration;
+
+use crate::audit;
 use crate::proxy::{self, storage::NewRoute};
 use crate::session::Account;
-use crate::AppState;
+use crate::{revert, AppState};
 use askama::Template;
 use axum::{
-    extract::{ConnectInfo, Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::Json,
     routing::{get, post},
     Form, Router,
 };
 use serde::{Deserialize, Serialize};
-use std::net::SocketAddr;
 
 #[derive(Template)]
 #[template(path = "proxy.html")]
@@ -111,6 +114,24 @@ async fn preview(
         "kind": kind.label(),
         "file": kind.file_name(&route.subdomain),
         "config": config,
+    })))
+}
+
+/// `GET /proxy/preview` — the dry-run diff of what Apply would write, across
+/// every config file (§11.2). Read-only: it renders and diffs, it never touches
+/// disk or reloads.
+async fn preview_all(State(state): State<AppState>, account: Account) -> Result<Json<serde_json::Value>, StatusCode> {
+    if !account.is_admin() {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    let changes = proxy::preview_changes(&state)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let changed = changes.iter().filter(|c| c.status != "unchanged").count();
+    Ok(Json(serde_json::json!({
+        "config_dir": proxy::config_dir(&state).map(|p| p.display().to_string()),
+        "changed": changed,
+        "files": changes,
     })))
 }
 
@@ -208,7 +229,6 @@ impl UpsertForm {
 
 async fn create(
     State(state): State<AppState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     account: Account,
     Form(form): Form<UpsertForm>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
@@ -221,19 +241,19 @@ async fn create(
         .await
         .map_err(|_| StatusCode::CONFLICT)?;
     let report = proxy::regenerate_all(&state).await.ok();
-    tracing::info!(
-        action = "proxy.route.create",
-        actor = %account.name,
-        target = format!("proxy:{id}"),
-        ip = %peer.ip(),
-        subdomain = %subdomain,
-    );
+    audit::event("proxy.route.create", &account)
+        .target(format!("proxy:{id}"))
+        // `regenerate_all` is best-effort here (the row is the source of truth),
+        // so the report is an Option and "did the config actually get written?"
+        // is a fact the audit row should carry rather than assume.
+        .detail(serde_json::json!({ "subdomain": subdomain, "written": report.as_ref().map(|r| r.written) }))
+        .record(&state.db)
+        .await;
     Ok(Json(serde_json::json!({ "id": id, "apply": report })))
 }
 
 async fn update(
     State(state): State<AppState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     account: Account,
     Path(id): Path<i64>,
     Form(form): Form<UpsertForm>,
@@ -247,19 +267,16 @@ async fn update(
         .await
         .map_err(|_| StatusCode::CONFLICT)?;
     let _ = proxy::regenerate_all(&state).await;
-    tracing::info!(
-        action = "proxy.route.update",
-        actor = %account.name,
-        target = format!("proxy:{id}"),
-        ip = %peer.ip(),
-        subdomain = %subdomain,
-    );
+    audit::event("proxy.route.update", &account)
+        .target(format!("proxy:{id}"))
+        .detail(serde_json::json!({ "subdomain": subdomain }))
+        .record(&state.db)
+        .await;
     Ok(StatusCode::NO_CONTENT)
 }
 
 async fn remove(
     State(state): State<AppState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     account: Account,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, StatusCode> {
@@ -270,12 +287,10 @@ async fn remove(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let _ = proxy::regenerate_all(&state).await;
-    tracing::info!(
-        action = "proxy.route.delete",
-        actor = %account.name,
-        target = format!("proxy:{id}"),
-        ip = %peer.ip(),
-    );
+    audit::event("proxy.route.delete", &account)
+        .target(format!("proxy:{id}"))
+        .record(&state.db)
+        .await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -286,7 +301,6 @@ struct ToggleForm {
 
 async fn toggle(
     State(state): State<AppState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     account: Account,
     Path(id): Path<i64>,
     Form(form): Form<ToggleForm>,
@@ -299,42 +313,128 @@ async fn toggle(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let _ = proxy::regenerate_all(&state).await;
-    tracing::info!(
-        action = "proxy.route.toggle",
-        actor = %account.name,
-        target = format!("proxy:{id}"),
-        ip = %peer.ip(),
-        enabled,
-    );
+    audit::event("proxy.route.toggle", &account)
+        .target(format!("proxy:{id}"))
+        .detail(serde_json::json!({ "enabled": enabled }))
+        .record(&state.db)
+        .await;
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// `?revert=<secs>` arms a self-revert (§11.1). Absent / 0 = fire-and-keep.
+#[derive(Deserialize)]
+struct ApplyQuery {
+    #[serde(default)]
+    revert: Option<u64>,
+}
+
+const REVERT_MIN_SECS: u64 = 5;
+const REVERT_MAX_SECS: u64 = 600;
+
 async fn apply(
     State(state): State<AppState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Query(query): Query<ApplyQuery>,
     account: Account,
-) -> Result<Json<proxy::ApplyReport>, StatusCode> {
+) -> Result<Json<serde_json::Value>, StatusCode> {
     if !account.is_admin() {
         return Err(StatusCode::FORBIDDEN);
     }
+
+    // Snapshot the current on-disk config *before* regenerating, so an armed
+    // apply has something to roll back to. `None` when the config can't be
+    // snapshotted (no config dir, or Cloudflare API mode) — then no timer is armed.
+    let snapshot = match query.revert {
+        Some(secs) if secs > 0 => proxy::snapshot_config(&state).await,
+        _ => None,
+    };
+
     let report = proxy::regenerate_all(&state)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    tracing::info!(
-        action = "proxy.apply",
-        actor = %account.name,
-        ip = %peer.ip(),
-        written = report.written,
-        errors = report.errors.len(),
-    );
-    Ok(Json(report))
+    audit::event("proxy.apply", &account)
+        .detail(serde_json::json!({ "written": report.written, "errors": report.errors.len() }))
+        // Applying a config that half-wrote is not a success, and an audit log
+        // that records it as one is worse than no entry at all.
+        .ok(report.errors.is_empty())
+        .record(&state.db)
+        .await;
+
+    // Arm the revert only on a clean apply with a snapshot behind it. A partial
+    // apply (errors present) is left for the operator to see and fix, not silently
+    // rolled back over.
+    let revert_info = match (snapshot, query.revert) {
+        (Some(snapshot), Some(secs)) if report.errors.is_empty() => {
+            let window = Duration::from_secs(secs.clamp(REVERT_MIN_SECS, REVERT_MAX_SECS));
+            let revert_state = state.clone();
+            let rollback: revert::RevertFn = Arc::new(move || {
+                let state = revert_state.clone();
+                let snapshot = snapshot.clone();
+                Box::pin(async move { proxy::restore_snapshot(&state, snapshot).await })
+            });
+            Some(state.reverts.arm("proxy", window, rollback))
+        }
+        _ => None,
+    };
+
+    // The frontend reads the ApplyReport fields (written/reload/errors) flat, so
+    // the revert descriptor is added alongside them rather than nesting the report.
+    let mut body = serde_json::to_value(&report).unwrap_or_else(|_| serde_json::json!({}));
+    if let Some(obj) = body.as_object_mut() {
+        obj.insert(
+            "revert".to_string(),
+            serde_json::to_value(revert_info).unwrap_or(serde_json::Value::Null),
+        );
+    }
+    Ok(Json(body))
 }
 
-async fn import_cloudflare(
+/// The token an armed apply hands back, sent to confirm or revert it.
+#[derive(Deserialize)]
+struct RevertToken {
+    token: String,
+}
+
+/// `POST /proxy/apply/confirm` — keep an armed apply (cancel its revert timer).
+async fn confirm_apply(
     State(state): State<AppState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     account: Account,
-) -> axum::response::Response {
+    Json(body): Json<RevertToken>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    if !account.is_admin() {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    let kept = state.reverts.confirm("proxy", &body.token);
+    audit::event("proxy.apply.confirmed", &account)
+        .ok(kept)
+        .record(&state.db)
+        .await;
+    Ok(Json(serde_json::json!({ "kept": kept })))
+}
+
+/// `POST /proxy/apply/revert` — roll an armed apply back now.
+async fn revert_apply_now(
+    State(state): State<AppState>,
+    account: Account,
+    Json(body): Json<RevertToken>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    if !account.is_admin() {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    let reverted = match state.reverts.take_for_revert("proxy", &body.token) {
+        Some(rollback) => {
+            rollback().await;
+            true
+        }
+        None => false,
+    };
+    audit::event("proxy.apply.revert_now", &account)
+        .ok(reverted)
+        .record(&state.db)
+        .await;
+    Ok(Json(serde_json::json!({ "reverted": reverted })))
+}
+
+async fn import_cloudflare(State(state): State<AppState>, account: Account) -> axum::response::Response {
     use axum::response::IntoResponse;
     if !account.is_admin() {
         return StatusCode::FORBIDDEN.into_response();
@@ -350,14 +450,10 @@ async fn import_cloudflare(
     }
     match proxy::cloudflared::import(&state).await {
         Ok((imported, updated, skipped)) => {
-            tracing::info!(
-                action = "proxy.import",
-                actor = %account.name,
-                ip = %peer.ip(),
-                imported,
-                updated,
-                skipped,
-            );
+            audit::event("proxy.import", &account)
+                .detail(serde_json::json!({ "imported": imported, "updated": updated, "skipped": skipped }))
+                .record(&state.db)
+                .await;
             Json(serde_json::json!({ "imported": imported, "updated": updated, "skipped": skipped })).into_response()
         }
         Err(e) => {
@@ -376,6 +472,9 @@ pub fn routes() -> Router<AppState> {
         .route("/proxy", get(page).post(create))
         .route("/proxy/data", get(data))
         .route("/proxy/apply", post(apply))
+        .route("/proxy/apply/confirm", post(confirm_apply))
+        .route("/proxy/apply/revert", post(revert_apply_now))
+        .route("/proxy/preview", get(preview_all))
         .route("/proxy/import", post(import_cloudflare))
         .route("/proxy/:id", post(update).delete(remove))
         .route("/proxy/:id/preview", get(preview))

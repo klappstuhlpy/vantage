@@ -1,0 +1,113 @@
+{% extends "layout.html" %}
+
+{% block title %}Alerts | Vantage{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="/static/css/pages/alerts.css">
+{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div class="page-head-text">
+        <h1>Alerts</h1>
+        <p class="page-sub">
+            Where Vantage tells you something is wrong — and whether it got through.
+        </p>
+    </div>
+</div>
+
+<noscript>
+    <div class="callout warn">
+        <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#triangle-alert"/></svg>
+        <div class="callout-body">This page needs JavaScript to show your sinks and their delivery history.</div>
+    </div>
+</noscript>
+
+{% if !any_configured %}
+{#
+    The whole page is inert without a sink, so say that at the top rather than
+    rendering four "not configured" cards and letting the operator infer it.
+#}
+<div class="callout warn">
+    <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#triangle-alert"/></svg>
+    <div class="callout-body">
+        <strong>No alert sink is configured, so Vantage cannot tell you anything.</strong>
+        A monitor going down, a certificate expiring, a backup failing to upload — all of it
+        is currently recorded here and nowhere else. Add a sink under <code>alerts</code> in
+        <code>config.json</code> and restart.
+    </div>
+</div>
+{% endif %}
+
+<section>
+    <div class="section-head">
+        <h2>Sinks</h2>
+    </div>
+    <div id="sinks" class="sink-list"></div>
+    <p class="section-note">
+        Destinations are read from <code>config.json</code> and can't be changed from here — an
+        endpoint that rewrites where your alarms go is the first thing worth having on a host
+        someone has just broken into. The switches above only decide whether a configured sink
+        currently fires.
+    </p>
+</section>
+
+<section>
+    <div class="section-head">
+        <h2>Events</h2>
+    </div>
+    <div class="card">
+        <div class="card-body">
+            <div class="setting">
+                <div class="setting-text">
+                    <div class="setting-title">Alert when someone signs in</div>
+                    <p class="setting-sub">
+                        Raises an alert on every successful sign-in, with the address and device.
+                        Worth having if you sign in twice a month; noise if you sign in daily —
+                        and an alarm you've learned to ignore is worse than none.
+                    </p>
+                </div>
+                <div class="setting-action">
+                    <label class="switch">
+                        <input type="checkbox" id="on-admin-login">
+                        <span class="switch-track" aria-hidden="true"></span>
+                        <span class="sr-only">Alert when someone signs in</span>
+                    </label>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section>
+    <div class="section-head">
+        <h2>Recent deliveries</h2>
+        <span class="count-badge" id="delivery-count">0</span>
+    </div>
+    <div class="card">
+        <div class="card-body flush">
+            <div class="table-wrap">
+                <table class="table" id="deliveries">
+                    <thead>
+                        <tr>
+                            <th>Sent</th>
+                            <th>Sink</th>
+                            <th>Alert</th>
+                            <th>Result</th>
+                        </tr>
+                    </thead>
+                    <tbody id="deliveries-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <p class="section-note">
+        The last 50 attempts. Before this existed, every send was fire-and-forget — a webhook
+        that had been quietly rejecting alerts for months looked exactly like a quiet month.
+    </p>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/js/pages/alerts.js"></script>
+{% endblock %}

@@ -1,0 +1,23 @@
+/* Backups page — composition only. */
+
+@layer pages {
+  .name-cell {
+    font-size: var(--fs-xs);
+    color: var(--ink-1);
+  }
+
+  /* The restore instructions sit between the summary and the list, where an
+     operator looking for "how do I get this back" will actually meet them. */
+  .callout.info {
+    margin: var(--sp-5) 0;
+  }
+
+  @media (max-width: 720px) {
+    .name-cell {
+      max-width: 10rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  }
+}

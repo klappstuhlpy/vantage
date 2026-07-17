@@ -1,0 +1,384 @@
+/* Home dashboard — the widget grid.
+ *
+ * Only composition lives here; every part inside a widget is a component from
+ * components.css. If a rule here starts restyling a component, it belongs there
+ * instead.
+ */
+
+@layer pages {
+  .text-down {
+    color: var(--down);
+  }
+
+  /* A 12-column grid; widgets span 3 / 6 / 12 (S / M / L). */
+  .widget-grid {
+    display: grid;
+    grid-template-columns: repeat(12, 1fr);
+    gap: var(--sp-3);
+    align-items: start;
+  }
+
+  .widget {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    grid-column: span 6;
+  }
+
+  .widget[data-size='s'] {
+    grid-column: span 3;
+  }
+  .widget[data-size='m'] {
+    grid-column: span 6;
+  }
+  .widget[data-size='l'] {
+    grid-column: span 12;
+  }
+
+  .widget-head {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    padding: var(--sp-3) var(--sp-4);
+    border-bottom: 1px solid var(--line-1);
+    color: var(--ink-3);
+  }
+
+  .widget-title {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-eyebrow);
+    color: var(--ink-2);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .widget-tools {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-1);
+    opacity: 0;
+    transition: opacity var(--dur-fast) var(--ease-out);
+  }
+
+  .widget:hover .widget-tools,
+  .widget:focus-within .widget-tools {
+    opacity: 1;
+  }
+
+  @media (hover: none) {
+    .widget-tools {
+      opacity: 1;
+    }
+  }
+
+  .widget-body {
+    padding: var(--sp-4);
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+    min-width: 0;
+  }
+
+  /* The headline number. */
+  .readout {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .readout-value {
+    font-family: var(--font-mono);
+    font-size: var(--fs-2xl);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+    color: var(--ink-1);
+  }
+
+  .readout.warn .readout-value {
+    color: var(--warn);
+  }
+  .readout.down .readout-value {
+    color: var(--down);
+  }
+
+  .readout-sub {
+    font-size: var(--fs-sm);
+    color: var(--ink-2);
+  }
+
+  .w-head-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--sp-3);
+  }
+
+  .w-chart {
+    width: 100%;
+    min-height: 56px;
+  }
+
+  .w-note {
+    font-size: var(--fs-sm);
+    color: var(--ink-3);
+  }
+
+  /* Compact label/value list — the shape most widgets use for detail. */
+  .w-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .w-list-row {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    padding: var(--sp-2) 0;
+    border-bottom: 1px solid var(--line-1);
+    font-size: var(--fs-sm);
+  }
+
+  .w-list-row:last-child {
+    border-bottom: 0;
+  }
+
+  .w-list-label {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--font-mono);
+    color: var(--ink-1);
+  }
+
+  .w-list-val {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--ink-2);
+    white-space: nowrap;
+  }
+
+  .w-more {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-1);
+    font-size: var(--fs-sm);
+    color: var(--ink-2);
+    text-decoration: none;
+  }
+
+  .w-more:hover {
+    color: var(--acc);
+  }
+
+  .w-more .icon {
+    width: 14px;
+    height: 14px;
+  }
+
+  /* =====================================================================
+     Edit mode
+     ===================================================================== */
+  .widget-edit-tools {
+    display: none;
+    align-items: center;
+    gap: var(--sp-2);
+  }
+
+  .is-editing-dashboard .widget-edit-tools {
+    display: flex;
+  }
+
+  /* In edit mode the per-widget links would compete with the edit controls. */
+  .is-editing-dashboard .widget-tools {
+    display: none;
+  }
+
+  .is-editing-dashboard .widget {
+    border-color: var(--acc-line);
+  }
+
+  /* The body is inert while rearranging — you are moving the card, not using it. */
+  .is-editing-dashboard .widget-body {
+    pointer-events: none;
+    opacity: 0.75;
+  }
+
+  .widget-grip {
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    color: var(--ink-3);
+    cursor: grab;
+    touch-action: none; /* let the pointer handler own the gesture */
+  }
+
+  .widget-grip:active {
+    cursor: grabbing;
+  }
+
+  /* The lifted card. JS owns its `transform` (it tracks the pointer), so this
+     only sets the float — a strong shadow, the accent edge, and a layer above
+     its neighbours. No transition here: the follow must be frame-tight. */
+  .widget.is-dragging {
+    z-index: 5;
+    opacity: 0.97;
+    box-shadow: var(--shadow-3), var(--glass-highlight);
+    border-color: var(--acc);
+    cursor: grabbing;
+    will-change: transform;
+  }
+
+  /* =====================================================================
+     Edit-mode wiggle — the "these are movable" tell, iOS-style.
+     The whole grid pauses it while a drag is sorting, because the FLIP that
+     slides the neighbours animates the same `transform` channel.
+     ===================================================================== */
+  @keyframes widget-wiggle {
+    0%,
+    100% {
+      transform: rotate(-0.55deg);
+    }
+    50% {
+      transform: rotate(0.55deg);
+    }
+  }
+
+  .is-editing-dashboard .widget {
+    transform-origin: 50% 50%;
+    animation: widget-wiggle 0.34s ease-in-out infinite;
+  }
+
+  /* Desync neighbours so it reads as organic, not a marching band. */
+  .is-editing-dashboard .widget:nth-child(3n) {
+    animation-delay: -0.11s;
+  }
+  .is-editing-dashboard .widget:nth-child(3n + 1) {
+    animation-delay: -0.22s;
+  }
+
+  .widget-grid.is-sorting .widget,
+  .widget.is-dragging {
+    animation: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .is-editing-dashboard .widget {
+      animation: none;
+    }
+  }
+
+  /* =====================================================================
+     Widget gallery
+     ===================================================================== */
+  .gallery-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-1);
+  }
+
+  .gallery-item {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    width: 100%;
+    padding: var(--sp-2) var(--sp-3);
+    border: 1px solid transparent;
+    border-radius: var(--r-s);
+    text-align: left;
+    transition:
+      background var(--dur-fast) var(--ease-out),
+      border-color var(--dur-fast) var(--ease-out);
+  }
+
+  .gallery-item:hover {
+    background: var(--bg-hover);
+  }
+
+  .gallery-item.is-added {
+    border-color: var(--acc-line);
+    background: var(--acc-soft);
+  }
+
+  .gallery-icon {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    flex: none;
+    border-radius: var(--r-s);
+    background: var(--bg-2);
+    border: 1px solid var(--line-1);
+    color: var(--ink-2);
+  }
+
+  .gallery-item.is-added .gallery-icon {
+    color: var(--acc);
+    border-color: var(--acc-line);
+  }
+
+  .gallery-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .gallery-title {
+    color: var(--ink-1);
+  }
+
+  .gallery-blurb {
+    font-size: var(--fs-sm);
+    color: var(--ink-3);
+  }
+
+  .gallery-check {
+    color: var(--ink-3);
+  }
+
+  .gallery-item.is-added .gallery-check {
+    color: var(--acc);
+  }
+
+  /* =====================================================================
+     Responsive — the 12-col grid folds to 6 then 1.
+     ===================================================================== */
+  @media (max-width: 1080px) {
+    .widget[data-size='s'] {
+      grid-column: span 4;
+    }
+  }
+
+  @media (max-width: 860px) {
+    .widget,
+    .widget[data-size='s'],
+    .widget[data-size='m'],
+    .widget[data-size='l'] {
+      grid-column: span 6;
+    }
+  }
+
+  @media (max-width: 560px) {
+    .widget-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .widget,
+    .widget[data-size='s'],
+    .widget[data-size='m'],
+    .widget[data-size='l'] {
+      grid-column: span 1;
+    }
+  }
+}

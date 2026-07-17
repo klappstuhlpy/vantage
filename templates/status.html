@@ -1,50 +1,99 @@
 {#
-    Public, unauthenticated uptime status page (takes `Option<Account>`), built
-    from the health monitors. Standalone — Vantage has no site base template, so
-    this is a self-contained document over the shared design tokens at /kls/base.css
-    plus /static/css/status.css. Deliberately exposes only display name + a coarse
-    status/uptime; the raw target address and check config never leave the admin API.
+    The public, unauthenticated status page.
+
+    Standalone by design, and the only template that is: it must not extend
+    layout.html (there is no session, no navigation and no live socket to offer
+    a stranger) and it must not extend auth.html either (this is not a door,
+    it's a notice board).
+
+    It deliberately exposes only a display name and a coarse status: the target
+    address, the check configuration and the latency figures never leave the
+    admin API. Anyone on the internet can read this page, so everything on it is
+    a decision to publish.
+
+    Context contract:
+      services: Vec<PublicService>  — name, status, status_label, uptime, last_check
+      overall / overall_label       — up | degraded | down | unknown
+      up / total                    — counts
 #}
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="description" content="Live operational status.">
     <title>Status | Vantage</title>
-    <link rel="stylesheet" href="/kls/base.css" type="text/css">
-    <link rel="stylesheet" href="/static/css/status.css" type="text/css">
-</head>
-<body>
-<main style="max-width: 760px; margin: 0 auto; padding: 2rem 1rem;">
-    <section class="status">
-        <p class="status-kicker"><span class="status-kicker-prompt">$</span> systemctl status klappstuhl.target</p>
-        <header class="status-banner {{ overall }}">
-            <span class="status-dot"></span>
-            <div>
-                <h1>{{ overall_label }}</h1>
-                {% if total > 0 %}
-                <p class="status-sub">{{ up }} of {{ total }} services operational</p>
-                {% endif %}
-            </div>
-        </header>
 
-        {% if services.is_empty() %}
-        <p class="status-empty">No public monitors are configured yet.</p>
-        {% else %}
-        <ul class="status-list">
-            {% for s in services %}
-            <li class="status-row" title="Last checked: {{ s.last_check }}">
-                <span class="status-dot {{ s.status }}"></span>
-                <span class="status-name">{{ s.name }}</span>
-                <span class="status-uptime" title="24h uptime">{{ s.uptime }}</span>
-                <span class="status-badge {{ s.status }}">{{ s.status_label }}</span>
-            </li>
-            {% endfor %}
-        </ul>
-        <p class="status-foot">Uptime shown is for the last 24 hours.</p>
-        {% endif %}
+    {# Honours the visitor's own light/dark preference. There is no theme
+       toggle here — no shell to put one in, and no reason to persist a choice
+       for someone who is passing through. #}
+    <meta name="color-scheme" content="dark light">
+    <script src="/static/js/core/theme-init.js"></script>
+
+    <link rel="icon" href="/static/icons/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/static/css/tokens.css">
+    <link rel="stylesheet" href="/static/css/base.css">
+    <link rel="stylesheet" href="/static/css/pages/status.css">
+</head>
+<body class="status-body">
+<main class="status">
+    <header class="status-head">
+        <div class="status-brand">
+            <svg class="scope" viewBox="0 0 24 24" aria-hidden="true">
+                <circle class="scope-ring" cx="12" cy="12" r="9"/>
+                <circle class="scope-grid" cx="12" cy="12" r="5" fill="none"/>
+                <path class="scope-grid" d="M12 3v18M3 12h18" fill="none"/>
+                <circle class="scope-dot" cx="12" cy="12" r="1.5"/>
+            </svg>
+            <span class="status-brand-name">Status</span>
+        </div>
+    </header>
+
+    <section class="banner {{ overall }}">
+        <span class="banner-icon" aria-hidden="true">
+            <svg class="icon icon-24">
+                {% if overall == "up" %}
+                <use href="/static/icons/sprite.svg#circle-check"/>
+                {% else if overall == "degraded" %}
+                <use href="/static/icons/sprite.svg#triangle-alert"/>
+                {% else if overall == "down" %}
+                <use href="/static/icons/sprite.svg#circle-x"/>
+                {% else %}
+                <use href="/static/icons/sprite.svg#circle-help"/>
+                {% endif %}
+            </svg>
+        </span>
+        <div class="banner-text">
+            <h1>{{ overall_label }}</h1>
+            {% if total > 0 %}
+            <p>{{ up }} of {{ total }} services operational</p>
+            {% endif %}
+        </div>
     </section>
+
+    {% if services.is_empty() %}
+    <p class="status-empty">No public monitors are configured yet.</p>
+    {% else %}
+    <ul class="services">
+        {% for s in services %}
+        <li class="service {{ s.status }}" title="Last checked: {{ s.last_check }}">
+            {#
+                The state is carried by a word and a colour, never by colour
+                alone. This page is read by people with every kind of vision, on
+                a phone, in a hurry — the dot on its own would be the whole
+                message to nobody.
+            #}
+            <span class="service-dot" aria-hidden="true"></span>
+            <span class="service-name">{{ s.name }}</span>
+            <span class="service-uptime" title="Proportion of checks that succeeded in the last 24 hours">{{ s.uptime }}</span>
+            <span class="service-state">{{ s.status_label }}</span>
+        </li>
+        {% endfor %}
+    </ul>
+    <footer class="status-foot">
+        <p>Uptime is measured over the last 24 hours.</p>
+    </footer>
+    {% endif %}
 </main>
 </body>
 </html>

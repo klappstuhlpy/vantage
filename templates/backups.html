@@ -1,160 +1,207 @@
 {% extends "layout.html" %}
+
 {% block title %}Backups | Vantage{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="/static/css/pages/backups.css">
+{% endblock %}
+
 {% block content %}
-<div class="page-header">
-    <h1>Database Backups</h1>
-    <p class="page-sub">
-        SQLite snapshots via <code>VACUUM INTO</code> — schedule, retention, and
-        off-site mirroring in one place.
-    </p>
+<div class="page-head">
+    <div class="page-head-text">
+        <h1>Backups</h1>
+        <p class="page-sub">Snapshots of Vantage's own database, taken with <code>VACUUM INTO</code>.</p>
+    </div>
+    <div class="page-actions">
+        {#
+            A real form, not a fetch: taking a backup is a plain POST that
+            redirects, so it works before any JS loads and needs none of it.
+        #}
+        <form method="post" action="/backups">
+            <button class="btn" type="submit" id="backup-now">
+                <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#camera"/></svg>
+                Back up now
+            </button>
+        </form>
+    </div>
 </div>
 
-<div class="stats-grid">
-    <div class="stat-card">
-        <div class="stat-label">Schedule</div>
-        {% if schedule_enabled %}
-        <div class="stat-value success">Every {{ interval_hours }}h</div>
-        {% else %}
-        <div class="stat-value muted">Disabled</div>
-        {% endif %}
-        <div class="stat-sub">
-            {% match next_run %}
-            {% when Some with (n) %}Next ~ {{ n }}
-            {% when None %}
-                {% if schedule_enabled %}Runs after first backup{% else %}Set <code>backup.interval_hours</code>{% endif %}
-            {% endmatch %}
+<section>
+    <div class="stat-grid">
+        <div class="stat">
+            <span class="stat-key">
+                <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#clock"/></svg>
+                Schedule
+            </span>
+            {% if schedule_enabled %}
+            <span class="stat-value">Every {{ interval_hours }}h</span>
+            {% else %}
+            <span class="stat-value">Off</span>
+            {% endif %}
+            <span class="stat-sub">
+                {% match next_run %}
+                {% when Some with (n) %}
+                next <time class="js-ts" datetime="{{ n }}">{{ n }}</time>
+                {% when None %}
+                    {% if schedule_enabled %}
+                    starts after the first backup
+                    {% else %}
+                    set <code>backup.interval_hours</code>
+                    {% endif %}
+                {% endmatch %}
+            </span>
         </div>
-    </div>
 
-    <div class="stat-card">
-        <div class="stat-label">Retention</div>
-        <div class="stat-value">{{ keep }}</div>
-        <div class="stat-sub">newest kept · {{ total_size_human }} on disk</div>
-    </div>
-
-    <div class="stat-card">
-        <div class="stat-label">Snapshots</div>
-        <div class="stat-value">{{ count }}</div>
-        <div class="stat-sub">
-            {% match last_backup %}
-            {% when Some with (l) %}last {{ l }}
-            {% when None %}none yet
-            {% endmatch %}
+        <div class="stat">
+            <span class="stat-key">
+                <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#history"/></svg>
+                Retention
+            </span>
+            <span class="stat-value">{{ keep }}</span>
+            <span class="stat-sub">newest kept · {{ total_size_human }} on disk</span>
         </div>
-    </div>
 
-    <div class="stat-card">
-        <div class="stat-label">Off-site</div>
+        <div class="stat">
+            <span class="stat-key">
+                <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#archive"/></svg>
+                Snapshots
+            </span>
+            <span class="stat-value">{{ count }}</span>
+            <span class="stat-sub">
+                {% match last_backup %}
+                {% when Some with (l) %}
+                last <time class="js-ts" datetime="{{ l }}">{{ l }}</time>
+                {% when None %}none yet
+                {% endmatch %}
+            </span>
+        </div>
+
         {% match remote_label %}
         {% when Some with (label) %}
             {% if remote_reachable %}
-            <div class="stat-value success">{{ off_site_count }} / {{ count }}</div>
-            <div class="stat-sub"><code>{{ label }}</code></div>
+            <div class="stat{% if off_site_count < count %} warn{% endif %}">
+                <span class="stat-key">
+                    <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#upload"/></svg>
+                    Off-site
+                </span>
+                <span class="stat-value">{{ off_site_count }} / {{ count }}</span>
+                <span class="stat-sub"><code>{{ label }}</code></span>
+            </div>
             {% else %}
-            <div class="stat-value muted">Unreachable</div>
-            <div class="stat-sub">
-                {% match remote_error %}
-                {% when Some with (e) %}{{ e }}
-                {% when None %}<code>{{ label }}</code>
-                {% endmatch %}
+            <div class="stat down">
+                <span class="stat-key">
+                    <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#upload"/></svg>
+                    Off-site
+                </span>
+                <span class="stat-value">Unreachable</span>
+                <span class="stat-sub">
+                    {% match remote_error %}
+                    {% when Some with (e) %}{{ e }}
+                    {% when None %}<code>{{ label }}</code>
+                    {% endmatch %}
+                </span>
             </div>
             {% endif %}
         {% when None %}
-        <div class="stat-value muted">Disabled</div>
-        <div class="stat-sub">set <code>backup.remote</code> in <code>config.json</code></div>
+        <div class="stat">
+            <span class="stat-key">
+                <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#upload"/></svg>
+                Off-site
+            </span>
+            <span class="stat-value">Off</span>
+            <span class="stat-sub">set <code>backup.remote</code> in <code>config.json</code></span>
+        </div>
         {% endmatch %}
+    </div>
+</section>
+
+{#
+    A backup you cannot restore is not a backup. The procedure is three steps
+    and it belongs on this page, not in a wiki nobody opens during an incident.
+#}
+<div class="callout info">
+    <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#info"/></svg>
+    <div class="callout-body">
+        <strong>To restore one:</strong> stop Vantage, replace <code>admin.db</code> with the downloaded
+        file, then start it again. Restoring while the server is running will not work — SQLite is holding
+        the file open.
     </div>
 </div>
 
-<section class="section">
-    <form method="post" action="/backups">
-        <button type="submit" class="button primary">Backup now</button>
-    </form>
-</section>
-
-<section class="section">
-    <h2>Snapshots <span class="count-badge">{{ count }}</span></h2>
-    {% if rows.is_empty() %}
-    <p class="empty-state">No backups yet — they appear here once the scheduler runs or you take one manually.</p>
-    {% else %}
-    <div class="table-wrap">
-        <table class="data-table" id="backup-table">
-            <thead>
-                <tr>
-                    <th>File</th>
-                    <th>Size</th>
-                    <th>Created (UTC)</th>
-                    <th>Off-site</th>
-                    <th></th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for b in rows %}
-                <tr>
-                    <td><code>{{ b.name }}</code></td>
-                    <td>{{ b.size_human }}</td>
-                    <td>{{ b.modified }}</td>
-                    <td><span class="pill {{ b.off_site_class }}">{{ b.off_site_label }}</span></td>
-                    <td class="actions">
-                        <a class="button outline small" href="/backups/{{ b.name }}/download">Download</a>
-                        {% if remote_label.is_some() %}
-                        <button type="button" class="button outline small" data-upload="{{ b.name }}">Upload off-site</button>
-                        {% endif %}
-                        <button type="button" class="button danger small" data-delete="{{ b.name }}">Delete</button>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+<section>
+    <div class="section-head">
+        <h2>Snapshots</h2>
+        <span class="count-badge">{{ count }}</span>
     </div>
-    <p class="page-sub">
-        To restore: stop the server, replace <code>admin.db</code> with a
-        downloaded backup, then start it again.
-    </p>
+
+    {% if rows.is_empty() %}
+    <div class="card">
+        <div class="card-body">
+            <div class="empty">
+                <span class="empty-icon">
+                    <svg class="icon icon-20" aria-hidden="true"><use href="/static/icons/sprite.svg#archive"/></svg>
+                </span>
+                <span class="empty-title">No snapshots yet</span>
+                <span class="empty-sub">
+                    {% if schedule_enabled %}
+                    The scheduler will take the first one shortly, or you can take one now.
+                    {% else %}
+                    No schedule is configured. Take one now, or set <code>backup.interval_hours</code>.
+                    {% endif %}
+                </span>
+            </div>
+        </div>
+    </div>
+    {% else %}
+    <div class="card">
+        <div class="card-body flush">
+            <div class="table-wrap">
+                <table class="table" id="backups">
+                    <thead>
+                        <tr>
+                            <th>File</th>
+                            <th class="num">Size</th>
+                            <th>Created</th>
+                            <th>Off-site</th>
+                            <th class="actions"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for b in rows %}
+                        <tr data-name="{{ b.name }}">
+                            <td class="mono name-cell">{{ b.name }}</td>
+                            <td class="num mono">{{ b.size_human }}</td>
+                            <td><time class="js-ts" datetime="{{ b.modified }}">{{ b.modified }}</time></td>
+                            <td><span class="pill {{ b.off_site_class }}">{{ b.off_site_label }}</span></td>
+                            <td class="actions">
+                                <div class="btn-row">
+                                    <a class="btn sm quiet" href="/backups/{{ b.name }}/download" download>
+                                        <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#download"/></svg>
+                                        Download
+                                    </a>
+                                    {% if remote_label.is_some() %}
+                                    <button class="btn sm quiet" type="button" data-upload="{{ b.name }}">
+                                        <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#upload"/></svg>
+                                        Send off-site
+                                    </button>
+                                    {% endif %}
+                                    <button class="btn sm ghost icon-only" type="button" data-delete="{{ b.name }}"
+                                            aria-label="Delete {{ b.name }}">
+                                        <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#trash-2"/></svg>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
     {% endif %}
 </section>
+{% endblock %}
 
-<script>
-    const table = document.getElementById('backup-table');
-    if (table) {
-        table.addEventListener('click', async e => {
-            const deleteBtn = e.target.closest('[data-delete]');
-            if (deleteBtn) {
-                const name = deleteBtn.dataset.delete;
-                deleteBtn.disabled = true;
-                try {
-                    const r = await fetch(`/backups/${name}/delete`, { method: 'POST' });
-                    if (r.ok) location.reload();
-                    else deleteBtn.disabled = false;
-                } catch (_) {
-                    deleteBtn.disabled = false;
-                }
-                return;
-            }
-
-            const uploadBtn = e.target.closest('[data-upload]');
-            if (uploadBtn) {
-                const name = uploadBtn.dataset.upload;
-                uploadBtn.disabled = true;
-                uploadBtn.textContent = 'Uploading...';
-                try {
-                    const r = await fetch(`/backups/${name}/upload`, { method: 'POST' });
-                    const data = await r.json();
-                    if (data.status === 'success') {
-                        uploadBtn.textContent = '✓ Uploaded';
-                        setTimeout(() => location.reload(), 1000);
-                    } else {
-                        alert(data.message || 'Upload failed');
-                        uploadBtn.disabled = false;
-                        uploadBtn.textContent = 'Upload off-site';
-                    }
-                } catch (err) {
-                    alert('Upload failed: ' + err.message);
-                    uploadBtn.disabled = false;
-                    uploadBtn.textContent = 'Upload off-site';
-                }
-            }
-        });
-    }
-</script>
+{% block scripts %}
+<script type="module" src="/static/js/pages/backups.js"></script>
 {% endblock %}

@@ -1168,14 +1168,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "kls-ui"
-version = "0.1.0"
-source = "git+ssh://git@github.com/klappstuhlpy/klappstuhl_me-shared?tag=v0.1.11#84a697f96ba8a85d44ac63692416240b6d8c3e6d"
-dependencies = [
- "axum",
-]
-
-[[package]]
 name = "kls-web-core"
 version = "0.1.0"
 source = "git+ssh://git@github.com/klappstuhlpy/klappstuhl_me-shared?tag=v0.1.11#84a697f96ba8a85d44ac63692416240b6d8c3e6d"
@@ -1547,6 +1539,12 @@ checksum = "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934"
 dependencies = [
  "unicode-ident",
 ]
+
+[[package]]
+name = "qrcode"
+version = "0.14.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d68782463e408eb1e668cf6152704bd856c78c5b6417adaee3203d8f4c1fc9ec"
 
 [[package]]
 name = "quick_cache"
@@ -2709,7 +2707,7 @@ checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 
 [[package]]
 name = "vantage"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -2727,10 +2725,10 @@ dependencies = [
  "getrandom 0.2.17",
  "hmac",
  "kls-agent",
- "kls-ui",
  "kls-web-core",
  "maxminddb",
  "nanoid",
+ "qrcode",
  "quick_cache",
  "reqwest",
  "rpassword",

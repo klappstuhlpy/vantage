@@ -1,0 +1,789 @@
+/* ==========================================================================
+   Vantage app shell — sidebar, topbar, content frame.
+   --------------------------------------------------------------------------
+   The frame is a two-column grid whose first column is a CSS variable, so
+   collapsing the sidebar to a rail is one token change rather than a layout
+   rewrite. Behaviour lives in js/core/shell.js.
+
+   Responsive ladder (§6):
+     >= 1080px  full sidebar
+     720–1080px icon rail (auto — no user state involved)
+     <  720px   off-canvas drawer behind a hamburger
+   ========================================================================== */
+
+@layer shell {
+  /* The frame is exactly one viewport tall and never scrolls. Only `.main`
+     scrolls, and it scrolls inside itself.
+
+     This used to be `min-height: 100vh` with the document doing the scrolling
+     and `position: sticky` on the sidebar and topbar to fake the pinning. That
+     is a halfway model, and it leaks: the document could pick up a few stray
+     pixels of scroll (a horizontal scrollbar alone is enough — `vh` is defined
+     against the viewport *ignoring* scrollbars, so 100vh is taller than what
+     you can actually see the moment one appears), and dragging that scroll
+     pushed the entire shell up, sidebar included.
+
+     A control plane's chrome must not be able to slide off the top of the
+     screen. Making the frame a real fixed frame means it structurally cannot,
+     rather than relying on the content never being a pixel too tall. The rest
+     of the shell was already written for this model — the sidebar is a
+     full-height column with its own internal `overflow-y: auto` nav. */
+  .app {
+    display: grid;
+    grid-template-columns: var(--sidebar-w) 1fr;
+    height: 100vh;
+    /* dvh tracks the visible viewport as a mobile browser's URL bar collapses.
+       Declared second so browsers without it keep the vh value above. */
+    height: 100dvh;
+    overflow: hidden;
+    /* Sever scroll chaining at the frame: an overscroll past the top or bottom
+       of `.main` must not bubble out and drag the whole document (and the fixed
+       chrome with it), which left a blank band under the page. */
+    overscroll-behavior: none;
+    transition: grid-template-columns var(--dur-mid) var(--ease-enter);
+  }
+
+  /* User-chosen rail (persisted). The auto-rail below is the same treatment
+     driven by viewport instead of preference. */
+  :root[data-sidebar='rail'] .app {
+    grid-template-columns: var(--sidebar-rail-w) 1fr;
+  }
+
+  /* =====================================================================
+     Sidebar
+     ===================================================================== */
+  /* No `position: sticky` and no `100vh` of its own: it is a grid item in a
+     frame that is already exactly one viewport tall, so it simply fills its
+     row. Sticky was only ever compensating for the document scrolling. */
+  .sidebar {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-1);
+    border-right: 1px solid var(--line-1);
+    overflow: hidden;
+    z-index: var(--z-drawer);
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    height: var(--topbar-h);
+    padding: 0 var(--sp-4);
+    flex: none;
+    border-bottom: 1px solid var(--line-1);
+    color: var(--ink-1);
+    text-decoration: none;
+  }
+
+  .brand:hover {
+    color: var(--ink-1);
+  }
+
+  .brand-name {
+    font-family: var(--font-mono);
+    font-size: var(--fs-md);
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .nav {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: var(--sp-3) var(--sp-2);
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-1);
+  }
+
+  .nav-group-label {
+    display: block;
+    padding: var(--sp-4) var(--sp-3) var(--sp-1);
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-eyebrow);
+    color: var(--ink-3);
+    white-space: nowrap;
+  }
+
+  .nav-group:first-child .nav-group-label {
+    padding-top: var(--sp-1);
+  }
+
+  .nav-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    height: 34px;
+    padding: 0 var(--sp-3);
+    border-radius: var(--r-s);
+    color: var(--ink-2);
+    font-size: var(--fs-md);
+    text-decoration: none;
+    white-space: nowrap;
+    transition:
+      background var(--dur-fast) var(--ease-out),
+      color var(--dur-fast) var(--ease-out);
+  }
+
+  .nav-item .icon {
+    flex: none;
+    color: var(--ink-3);
+    transition: color var(--dur-fast) var(--ease-out);
+  }
+
+  .nav-item:hover {
+    background: var(--bg-hover);
+    color: var(--ink-1);
+  }
+
+  .nav-item:hover .icon {
+    color: var(--ink-2);
+  }
+
+  .nav-item[aria-current='page'] {
+    background: var(--acc-soft);
+    color: var(--acc);
+    font-weight: 500;
+  }
+
+  .nav-item[aria-current='page'] .icon {
+    color: var(--acc);
+  }
+
+  /* The active marker: a short accent bar on the leading edge. */
+  .nav-item[aria-current='page']::before {
+    content: '';
+    position: absolute;
+    left: calc(var(--sp-2) * -1); /* reaches through .nav's padding to the frame edge */
+    top: 50%;
+    width: 3px;
+    height: 16px;
+    background: var(--acc);
+    border-radius: 0 2px 2px 0;
+    transform: translateY(-50%);
+  }
+
+  .nav-item .count-badge {
+    margin-left: auto;
+  }
+
+  .sidebar-foot {
+    flex: none;
+    padding: var(--sp-2);
+    border-top: 1px solid var(--line-1);
+  }
+
+  .account-btn {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    width: 100%;
+    padding: var(--sp-2);
+    border-radius: var(--r-s);
+    color: var(--ink-1);
+    transition: background var(--dur-fast) var(--ease-out);
+  }
+
+  .account-btn:hover {
+    background: var(--bg-hover);
+  }
+
+  .avatar {
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    flex: none;
+    border-radius: var(--r-full);
+    background: var(--acc-soft);
+    border: 1px solid var(--acc-line);
+    color: var(--acc);
+    font-family: var(--font-mono);
+    font-size: var(--fs-sm);
+    font-weight: 500;
+    text-transform: uppercase;
+  }
+
+  .account-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: left;
+    font-size: var(--fs-md);
+  }
+
+  .account-btn > .icon:last-child {
+    color: var(--ink-3);
+  }
+
+  /* =====================================================================
+     The Scope — the brand mark, and an honest live indicator.
+     It sweeps only while the WebSocket is actually connected; shell.js sets
+     data-live on <html>. Under reduced motion the sweep is replaced by a
+     static ring + pulsing centre dot (handled below).
+     ===================================================================== */
+  .scope {
+    width: 24px;
+    height: 24px;
+    flex: none;
+    color: var(--ink-3);
+    transition: color var(--dur-mid) var(--ease-out);
+  }
+
+  .scope-ring {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    opacity: 0.5;
+  }
+
+  .scope-grid {
+    stroke: currentColor;
+    stroke-width: 1;
+    opacity: 0.25;
+  }
+
+  .scope-sweep {
+    fill: currentColor;
+    opacity: 0;
+    transform-origin: 12px 12px;
+  }
+
+  .scope-dot {
+    fill: currentColor;
+    opacity: 0.9;
+  }
+
+  :root[data-live='live'] .scope {
+    color: var(--acc);
+    filter: drop-shadow(0 0 4px var(--acc-line));
+  }
+
+  :root[data-live='live'] .scope-sweep {
+    opacity: 0.35;
+    animation: sweep 3s linear infinite;
+  }
+
+  :root[data-live='connecting'] .scope {
+    color: var(--warn);
+  }
+
+  :root[data-live='connecting'] .scope-dot {
+    animation: pill-pulse 1s var(--ease-out) infinite;
+  }
+
+  :root[data-live='offline'] .scope {
+    color: var(--ink-3);
+  }
+
+  @keyframes sweep {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  /* Honest fallback: no sweep, but the live state still reads at a glance. */
+  @media (prefers-reduced-motion: reduce) {
+    :root[data-live='live'] .scope-sweep {
+      animation: none;
+      opacity: 0.25;
+    }
+  }
+
+  /* =====================================================================
+     Main column
+     ===================================================================== */
+  .main {
+    display: flex;
+    flex-direction: column;
+    min-width: 0; /* lets wide tables scroll instead of stretching the grid */
+    /* The app's one scrollport. The topbar's `position: sticky` now resolves
+       against this rather than the document, which is what keeps it pinned. */
+    overflow-y: auto;
+    /* Contain the rubber-band here too: reaching the top/bottom absorbs the
+       overscroll instead of passing it up to the frame or the document. */
+    overscroll-behavior: none;
+  }
+
+  .topbar {
+    position: sticky;
+    top: 0;
+    z-index: var(--z-topbar);
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    height: var(--topbar-h);
+    flex: none;
+    padding: 0 var(--sp-5);
+    /* Glass, matching the app's floating surfaces — content scrolls and
+       refracts under it rather than sliding behind an opaque bar. */
+    background: var(--glass-bg);
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+    backdrop-filter: blur(var(--glass-blur));
+    border-bottom: 1px solid var(--line-1);
+  }
+
+  .topbar-search {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    width: min(320px, 40vw);
+    height: 30px;
+    padding: 0 var(--sp-2) 0 var(--sp-3);
+    background: var(--bg-1);
+    border: 1px solid var(--line-1);
+    border-radius: var(--r-s);
+    color: var(--ink-3);
+    font-size: var(--fs-md);
+    text-align: left;
+    transition:
+      border-color var(--dur-fast) var(--ease-out),
+      background var(--dur-fast) var(--ease-out);
+  }
+
+  .topbar-search:hover {
+    border-color: var(--line-2);
+    background: var(--bg-2);
+  }
+
+  .topbar-search-label {
+    flex: 1;
+  }
+
+  .live-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-2);
+    height: 22px;
+    padding: 0 var(--sp-2);
+    border-radius: var(--r-full);
+    border: 1px solid var(--line-1);
+    background: var(--bg-1);
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--ink-3);
+  }
+
+  .live-badge::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
+  :root[data-live='live'] .live-badge {
+    color: var(--ok);
+    border-color: color-mix(in srgb, var(--ok) 25%, transparent);
+    background: var(--ok-soft);
+  }
+
+  :root[data-live='live'] .live-badge::before {
+    animation: pill-pulse 2s var(--ease-out) infinite;
+  }
+
+  :root[data-live='connecting'] .live-badge {
+    color: var(--warn);
+    border-color: color-mix(in srgb, var(--warn) 25%, transparent);
+    background: var(--warn-soft);
+  }
+
+  /* One truthful label per state, swapped by CSS so no JS has to remember to
+     update the text (the old UI had per-page labels that drifted). */
+  .live-badge-text::after {
+    content: 'offline';
+  }
+
+  :root[data-live='live'] .live-badge-text::after {
+    content: 'live';
+  }
+
+  :root[data-live='connecting'] .live-badge-text::after {
+    content: 'connecting';
+  }
+
+  .icon-btn {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    flex: none;
+    border-radius: var(--r-s);
+    color: var(--ink-2);
+    transition:
+      background var(--dur-fast) var(--ease-out),
+      color var(--dur-fast) var(--ease-out);
+  }
+
+  .icon-btn:hover {
+    background: var(--bg-hover);
+    color: var(--ink-1);
+  }
+
+  .icon-btn[aria-expanded='true'] {
+    background: var(--bg-active);
+    color: var(--ink-1);
+  }
+
+  .nav-toggle {
+    display: none;
+  }
+
+  /* =====================================================================
+     Safe mode (§11.3)
+     The topbar button reflects the live state; the banner and the disabled
+     destructive controls are set by core/safemode.js via body.is-safe-mode.
+     None of this enforces anything — the server's 423 does — it just stops the
+     operator trying.
+     ===================================================================== */
+  .safemode-btn.is-on {
+    color: var(--warn);
+    background: var(--warn-soft);
+  }
+
+  .safemode-banner {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    padding: var(--sp-2) var(--sp-5);
+    background: var(--warn-soft);
+    color: var(--ink-1);
+    border-bottom: 1px solid var(--warn);
+    font-size: var(--fs-md);
+  }
+
+  .safemode-banner .icon {
+    color: var(--warn);
+    flex: none;
+  }
+
+  .safemode-banner-text {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .safemode-banner .btn {
+    flex: none;
+  }
+
+  /* When engaged, every destructive control is dimmed and inert. It is a body
+     class + a CSS rule (rather than a per-button disable) precisely so it also
+     catches controls a page renders after this runs. The server is still the
+     thing that refuses the action; this only removes the temptation. */
+  body.is-safe-mode .btn.danger,
+  body.is-safe-mode [data-destructive] {
+    opacity: 0.45;
+    pointer-events: none;
+    cursor: not-allowed;
+  }
+
+  /* =====================================================================
+     Content
+     ===================================================================== */
+  .content {
+    flex: 1;
+    width: 100%;
+    max-width: var(--content-max);
+    margin: 0 auto;
+    padding: var(--sp-5);
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-5);
+  }
+
+  .page-head {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--sp-4);
+    flex-wrap: wrap;
+  }
+
+  .page-head-text {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .page-head h1 {
+    font-size: var(--fs-2xl);
+  }
+
+  .page-sub {
+    margin-top: var(--sp-1);
+    color: var(--ink-2);
+    font-size: var(--fs-md);
+  }
+
+  .page-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    flex-wrap: wrap;
+  }
+
+  /* Sections stack with a consistent rhythm; pages should not set their own
+     top/bottom margins on blocks. */
+  .content > section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+  }
+
+  /* =====================================================================
+     Appearance popover (theme / accent / density)
+     ===================================================================== */
+  .appearance {
+    width: 248px;
+    padding: var(--sp-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-4);
+  }
+
+  .appearance-row {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+  }
+
+  .appearance-row > .eyebrow {
+    color: var(--ink-3);
+  }
+
+  .appearance .segmented {
+    width: 100%;
+  }
+
+  .appearance .segmented button {
+    flex: 1;
+  }
+
+  .accent-swatches {
+    display: flex;
+    gap: var(--sp-2);
+  }
+
+  .swatch {
+    width: 26px;
+    height: 26px;
+    border-radius: var(--r-full);
+    border: 2px solid transparent;
+    background: var(--swatch, var(--acc));
+    box-shadow: inset 0 0 0 1px var(--line-2);
+    transition:
+      transform var(--dur-fast) var(--ease-out),
+      border-color var(--dur-fast) var(--ease-out);
+  }
+
+  .swatch:hover {
+    transform: scale(1.1);
+  }
+
+  .swatch[aria-pressed='true'] {
+    border-color: var(--ink-1);
+  }
+
+  /* =====================================================================
+     Responsive
+     ===================================================================== */
+
+  /* Auto-rail: below 1080 the label column costs more than it returns. */
+  @media (max-width: 1080px) {
+    .app,
+    :root[data-sidebar='rail'] .app {
+      grid-template-columns: var(--sidebar-rail-w) 1fr;
+    }
+
+    .sidebar-collapse {
+      display: none;
+    }
+  }
+
+  /* Rail presentation — shared by the user-chosen rail and the auto-rail. */
+  :root[data-sidebar='rail'] .nav-item-label,
+  :root[data-sidebar='rail'] .brand-name,
+  :root[data-sidebar='rail'] .account-name,
+  :root[data-sidebar='rail'] .nav-group-label,
+  :root[data-sidebar='rail'] .account-btn > .icon:last-child,
+  :root[data-sidebar='rail'] .nav-item .count-badge {
+    display: none;
+  }
+
+  :root[data-sidebar='rail'] .nav-item,
+  :root[data-sidebar='rail'] .account-btn,
+  :root[data-sidebar='rail'] .brand {
+    justify-content: center;
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  /* Groups still need separating without their labels. */
+  :root[data-sidebar='rail'] .nav-group + .nav-group {
+    margin-top: var(--sp-3);
+    padding-top: var(--sp-3);
+    border-top: 1px solid var(--line-1);
+  }
+
+  @media (max-width: 1080px) {
+    .nav-item-label,
+    .brand-name,
+    .account-name,
+    .nav-group-label,
+    .account-btn > .icon:last-child,
+    .nav-item .count-badge {
+      display: none;
+    }
+
+    .nav-item,
+    .account-btn,
+    .brand {
+      justify-content: center;
+      padding-left: 0;
+      padding-right: 0;
+    }
+
+    .nav-group + .nav-group {
+      margin-top: var(--sp-3);
+      padding-top: var(--sp-3);
+      border-top: 1px solid var(--line-1);
+    }
+  }
+
+  /* Off-canvas drawer. The sidebar leaves the grid entirely so the content
+     column gets the full viewport. */
+  @media (max-width: 720px) {
+    .app,
+    :root[data-sidebar='rail'] .app {
+      grid-template-columns: 1fr;
+    }
+
+    .sidebar {
+      position: fixed;
+      inset: 0 auto 0 0;
+      width: var(--sidebar-w);
+      transform: translateX(-100%);
+      visibility: hidden;
+      box-shadow: var(--shadow-3);
+      transition:
+        transform var(--dur-mid) var(--ease-enter),
+        visibility var(--dur-mid);
+    }
+
+    /* Inside the drawer the sidebar is never a rail — it has room for labels. */
+    .sidebar.is-open {
+      transform: none;
+      visibility: visible;
+    }
+
+    .sidebar.is-open .nav-item-label,
+    .sidebar.is-open .brand-name,
+    .sidebar.is-open .account-name,
+    .sidebar.is-open .nav-group-label,
+    .sidebar.is-open .nav-item .count-badge {
+      display: revert;
+    }
+
+    .sidebar.is-open .nav-item,
+    .sidebar.is-open .account-btn,
+    .sidebar.is-open .brand {
+      justify-content: flex-start;
+      padding-left: var(--sp-3);
+      padding-right: var(--sp-3);
+    }
+
+    .sidebar.is-open .nav-group + .nav-group {
+      margin-top: 0;
+      padding-top: 0;
+      border-top: 0;
+    }
+
+    .nav-toggle {
+      display: grid;
+    }
+
+    .topbar {
+      padding: 0 var(--sp-3);
+    }
+
+    .topbar-search {
+      width: auto;
+      flex: 1;
+    }
+
+    .topbar-search-label,
+    .topbar-search .kbd {
+      display: none;
+    }
+
+    .content {
+      padding: var(--sp-4) var(--sp-3);
+      gap: var(--sp-4);
+    }
+  }
+
+  /* Phone: the search box collapses to its icon; live state stays visible
+     because it is the one thing you check at a glance. */
+  @media (max-width: 420px) {
+    .topbar-search {
+      width: 30px;
+      flex: none;
+      justify-content: center;
+      padding: 0;
+    }
+
+    /* The badge collapses to its dot, but the state word is clipped rather
+       than display:none'd — display:none would drop it from the accessibility
+       tree, leaving a screen reader with "Connection:" and no answer. */
+    .live-badge-text {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+    }
+
+    .live-badge {
+      width: 22px;
+      padding: 0;
+      justify-content: center;
+    }
+
+    .page-head h1 {
+      font-size: var(--fs-xl);
+    }
+  }
+
+  /* =====================================================================
+     Print — an operator pasting a page into an incident report
+     ===================================================================== */
+  @media print {
+    .sidebar,
+    .topbar,
+    .page-actions,
+    .toast-stack {
+      display: none !important;
+    }
+
+    .app {
+      grid-template-columns: 1fr;
+    }
+
+    .content {
+      padding: 0;
+      max-width: none;
+    }
+  }
+}

@@ -1,16 +1,76 @@
 {% extends "layout.html" %}
-{% block title %}SSH Audit | Vantage{% endblock %}
+
+{% block title %}SSH audit | Vantage{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="/static/css/pages/ssh.css">
+{% endblock %}
+
 {% block content %}
-<div class="admin-page-header">
-    <div>
-        <h1>SSH Session Audit</h1>
-        <p>Public-key authentication events and token usage.</p>
+<div class="page-head">
+    <div class="page-head-text">
+        <h1>SSH audit</h1>
+        <p class="page-sub">Every key and token event Vantage recorded, newest first.</p>
+    </div>
+    <div class="page-actions">
+        <a class="btn quiet" href="/ssh">
+            <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#chevron-left"/></svg>
+            Keys and tokens
+        </a>
+        <button class="btn quiet" id="refresh-btn" type="button">
+            <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#refresh-cw"/></svg>
+            Refresh
+        </button>
     </div>
 </div>
 
-<div id="ssh-audit-app">
-    <p>Loading SSH audit log...</p>
-</div>
+<noscript>
+    <div class="callout warn">
+        <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#triangle-alert"/></svg>
+        <div class="callout-body">This page needs JavaScript to load the audit log.</div>
+    </div>
+</noscript>
 
-<script src="/static/js/ssh.js"></script>
+<div class="card">
+    <div class="card-body audit-toolbar">
+        <div class="input-icon audit-search">
+            <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#search"/></svg>
+            <input class="input" id="action" type="search" placeholder="Filter by action…" autocomplete="off"
+                   aria-label="Filter by action">
+        </div>
+
+        <label class="field inline">
+            <span class="label">Show</span>
+            <select class="select" id="limit" aria-label="Entries to show">
+                <option value="50">50</option>
+                <option value="200" selected>200</option>
+                <option value="1000">1000</option>
+            </select>
+        </label>
+
+        <div class="spacer"></div>
+        <span class="audit-count" id="count"></span>
+    </div>
+
+    <div class="card-body flush">
+        <div class="table-wrap">
+            <table class="table" id="audit">
+                <thead>
+                    <tr>
+                        <th>When</th>
+                        <th>Event</th>
+                        <th>Key</th>
+                        <th>Source</th>
+                        <th>Client</th>
+                    </tr>
+                </thead>
+                <tbody id="audit-body"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/js/pages/ssh_audit.js"></script>
 {% endblock %}

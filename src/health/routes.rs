@@ -28,6 +28,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::audit;
 use crate::health::{self, checker::CheckKind, storage::NewTarget};
 use crate::session::Account;
 use crate::AppState;
@@ -109,7 +110,12 @@ async fn status_page(State(state): State<AppState>, _account: Option<Account>) -
             name: s.target.name,
             status_label: status_label(&status),
             status,
-            uptime: format!("{:.2}%", s.uptime_24h),
+            // uptime_24h is a FRACTION (0.0–1.0), not a percentage — see
+            // storage::uptime_stats, where it comes straight out of
+            // `SUM(up) * 1.0 / COUNT(*)`. This used to render it as
+            // `{:.2}%` with no conversion, so a service with flawless uptime
+            // advertised "1.00%" on the public status page.
+            uptime: format!("{:.2}%", s.uptime_24h * 100.0),
             last_check,
         });
     }
@@ -307,7 +313,11 @@ async fn create(
     let id = health::storage::create_target(&state, new)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    tracing::info!(actor = %account.name, target = %format!("health:{id}"), name = %name, "health.target.create");
+    audit::event("health.target.create", &account)
+        .target(format!("health:{id}"))
+        .detail(serde_json::json!({ "name": name }))
+        .record(&state.db)
+        .await;
     Ok(Json(serde_json::json!({ "id": id })))
 }
 
@@ -325,7 +335,11 @@ async fn update(
     health::storage::update_target(&state, id, new)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    tracing::info!(actor = %account.name, target = %format!("health:{id}"), name = %name, "health.target.update");
+    audit::event("health.target.update", &account)
+        .target(format!("health:{id}"))
+        .detail(serde_json::json!({ "name": name }))
+        .record(&state.db)
+        .await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -340,7 +354,10 @@ async fn remove(
     health::storage::delete_target(&state, id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    tracing::info!(actor = %account.name, target = %format!("health:{id}"), "health.target.delete");
+    audit::event("health.target.delete", &account)
+        .target(format!("health:{id}"))
+        .record(&state.db)
+        .await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -362,7 +379,11 @@ async fn toggle(
     health::storage::set_enabled(&state, id, enabled)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    tracing::info!(actor = %account.name, target = %format!("health:{id}"), enabled, "health.target.toggle");
+    audit::event("health.target.toggle", &account)
+        .target(format!("health:{id}"))
+        .detail(serde_json::json!({ "enabled": enabled }))
+        .record(&state.db)
+        .await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -377,7 +398,11 @@ async fn check_now(
     let outcome = health::run_check_now(&state, id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    tracing::info!(actor = %account.name, target = %format!("health:{id}"), status = %outcome.status_str(), "health.target.probe");
+    audit::event("health.target.probe", &account)
+        .target(format!("health:{id}"))
+        .detail(serde_json::json!({ "status": outcome.status_str() }))
+        .record(&state.db)
+        .await;
     Ok(Json(outcome))
 }
 

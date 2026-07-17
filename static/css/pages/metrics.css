@@ -1,0 +1,34 @@
+/* Metrics page — composition only. */
+
+@layer pages {
+  .chart-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    gap: var(--sp-3);
+  }
+
+  .chart-grid .card-header .eyebrow {
+    color: var(--ink-3);
+  }
+
+  /* uPlot needs a sized box before it measures; without a min-height the first
+     paint collapses to zero and the chart renders 0px tall. */
+  .chart-grid .chart {
+    min-height: 200px;
+  }
+
+  .chart-empty {
+    display: grid;
+    place-items: center;
+    min-height: 200px;
+    color: var(--ink-3);
+    font-size: var(--fs-sm);
+    text-align: center;
+  }
+
+  @media (max-width: 720px) {
+    .chart-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+}

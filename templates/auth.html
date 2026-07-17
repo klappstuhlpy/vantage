@@ -1,0 +1,77 @@
+{#
+    The auth shell — login and the 2FA challenge.
+
+    Deliberately NOT layout.html: there is no session yet, so there is no
+    sidebar, no live socket, no account menu and no search. Extending the app
+    shell would mean rendering navigation to someone who cannot use any of it.
+
+    ── Block contract ──────────────────────────────────────────────────────
+      title    page title, inside "… | Vantage"
+      heading  the <h1>
+      intro    one line under the heading
+      form     the form body
+
+    ── Context contract ────────────────────────────────────────────────────
+      error: Option<String>  — rendered in an alert above the form
+
+    theme-init.js is still the first thing in <head>: an operator who chose the
+    light theme should not get a dark flash on the one page they hit while
+    logged out. It reads localStorage only — no session required.
+#}
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex, nofollow">
+    <meta name="color-scheme" content="dark light">
+    <title>{% block title %}Sign in{% endblock %} | Vantage</title>
+
+    <script src="/static/js/core/theme-init.js"></script>
+
+    <link rel="icon" href="/static/icons/favicon.svg" type="image/svg+xml">
+    <link rel="preload" href="/static/fonts/plex-sans-400.woff2" as="font" type="font/woff2" crossorigin>
+
+    <link rel="stylesheet" href="/static/css/tokens.css">
+    <link rel="stylesheet" href="/static/css/base.css">
+    <link rel="stylesheet" href="/static/css/components.css">
+    <link rel="stylesheet" href="/static/css/pages/auth.css">
+</head>
+<body class="auth-body">
+<main class="auth">
+    <div class="auth-card">
+        <div class="auth-brand">
+            <svg class="scope" viewBox="0 0 24 24" aria-hidden="true">
+                <circle class="scope-ring" cx="12" cy="12" r="9"/>
+                <circle class="scope-grid" cx="12" cy="12" r="5" fill="none"/>
+                <path class="scope-grid" d="M12 3v18M3 12h18" fill="none"/>
+                <circle class="scope-dot" cx="12" cy="12" r="1.5"/>
+            </svg>
+            <span class="auth-brand-name">Vantage</span>
+        </div>
+
+        <h1 class="auth-title">{% block heading %}Sign in{% endblock %}</h1>
+        <p class="auth-intro">{% block intro %}{% endblock %}</p>
+
+        {#
+            role="alert" so a screen reader hears the failure. It is rendered
+            only when present, rather than as an empty live region, because the
+            page is a fresh document on every attempt — there is nothing for a
+            live region to observe changing.
+        #}
+        {% match error %}
+        {% when Some with (e) %}
+        <div class="auth-error" role="alert">
+            <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#circle-alert"/></svg>
+            <span>{{ e }}</span>
+        </div>
+        {% when None %}
+        {% endmatch %}
+
+        {% block form %}{% endblock %}
+    </div>
+
+    <p class="auth-foot">Vantage · security-first control plane</p>
+</main>
+</body>
+</html>

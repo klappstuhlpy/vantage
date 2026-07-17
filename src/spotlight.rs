@@ -1,9 +1,12 @@
 //! Spotlight (Ctrl+K) backend — a fuzzy search across all browseable pages,
-//! Docker containers, SSH keys, firewall rules, and secret findings.
+//! Docker containers, SSH keys, firewall rules, secret findings, and operator
+//! scripts.
 //!
 //! GET /spotlight/search?q= — returns JSON `{ items: [...] }`
 //!
-//! Search / navigation only (no script execution — that's the cron scheduler).
+//! Navigation only. Every item resolves to a URL, including scripts: running one
+//! needs a sudo prompt and produces output worth reading, so the palette takes
+//! you to the script's card and the run happens there.
 
 use crate::{session::Account, AppState};
 use axum::{
@@ -65,6 +68,10 @@ fn static_nav() -> Vec<SpotlightItem> {
         SpotlightItem::nav("Backups", "SQLite snapshots, download/restore", "/backups"),
         SpotlightItem::nav("Database", "Browse and query the database", "/database"),
         SpotlightItem::nav("Logs", "Tail and filter application logs", "/logs/view"),
+        SpotlightItem::nav("Scripts", "Operator scripts, schedules, run history", "/scripts"),
+        SpotlightItem::nav("Audit log", "Who changed what, and from where", "/audit"),
+        SpotlightItem::nav("Alerts", "Notification sinks and delivery log", "/alerts"),
+        SpotlightItem::nav("Account", "Password, two-factor, active sessions", "/account"),
     ]
 }
 
@@ -89,6 +96,25 @@ async fn search(State(state): State<AppState>, _account: Account, Query(params):
 
     if q.is_empty() {
         return Json(serde_json::json!({ "items": items })).into_response();
+    }
+
+    // Operator scripts. These navigate to the script's card rather than running
+    // it: a run needs a sudo prompt and has output worth reading, and neither
+    // fits in a palette row that closes the moment you pick it.
+    for script in &state.config.spotlight_scripts {
+        let description = script.description.clone().unwrap_or_default();
+        if contains_ci(&script.name, &q) || contains_ci(&description, &q) || contains_ci(&script.id, &q) {
+            items.push(SpotlightItem::result(
+                "script",
+                script.name.clone(),
+                if description.is_empty() {
+                    script.command.clone()
+                } else {
+                    description
+                },
+                format!("/scripts#{}", script.id),
+            ));
+        }
     }
 
     let like = format!("%{q}%");

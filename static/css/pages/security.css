@@ -1,0 +1,125 @@
+/* Security page — composition only. */
+
+@layer pages {
+  .split {
+    display: grid;
+    grid-template-columns: 1.35fr 1fr;
+    gap: var(--sp-5);
+    align-items: start;
+  }
+
+  /* =====================================================================
+     Ranked bar lists — reason and country breakdowns
+     ===================================================================== */
+  .bars {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+  }
+
+  .bar-row {
+    display: grid;
+    grid-template-columns: minmax(0, 9rem) 1fr auto;
+    align-items: center;
+    gap: var(--sp-3);
+  }
+
+  .bar-label {
+    font-size: var(--fs-sm);
+    color: var(--ink-2);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .bar-track {
+    height: 8px;
+    background: var(--bg-2);
+    border-radius: var(--r-full);
+    overflow: hidden;
+  }
+
+  .bar-fill {
+    display: block;
+    height: 100%;
+    background: var(--acc);
+    border-radius: var(--r-full);
+    /* Every bar animates from nothing on each range change; the width is the
+       only thing that moves, so this is cheap and reads as the data arriving. */
+    transition: width var(--dur-mid) var(--ease-out);
+  }
+
+  .bar-value {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: var(--fs-sm);
+    color: var(--ink-1);
+    min-width: 3.5rem;
+    text-align: right;
+  }
+
+  .panel-note {
+    margin: 0 0 var(--sp-4);
+    font-size: var(--fs-xs);
+    color: var(--ink-3);
+  }
+
+  /* =====================================================================
+     Tables
+     ===================================================================== */
+  .place {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-2);
+  }
+
+  /* The flag is an emoji: keep it off the mono ramp so it doesn't get squashed
+     into a monospace cell, and stop it inheriting a tabular-nums font. */
+  .flag {
+    font-family: var(--font-sans);
+    font-size: 1rem;
+    line-height: 1;
+  }
+
+  .dim {
+    color: var(--ink-3);
+  }
+
+  /* A request path is attacker-controlled and can be arbitrarily long. Clamp it
+     so one hostile row can't blow the table's column widths apart; the full
+     value stays in the title attribute. */
+  .table td.path {
+    max-width: 22rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--ink-2);
+  }
+
+  /* =====================================================================
+     Cloudflare
+     ===================================================================== */
+  #cf .stat-grid {
+    margin-bottom: var(--sp-4);
+  }
+
+  .cf-chart-card {
+    margin-bottom: var(--sp-4);
+  }
+
+  @media (max-width: 960px) {
+    .split {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .bar-row {
+      grid-template-columns: minmax(0, 6rem) 1fr auto;
+    }
+
+    .table td.path {
+      max-width: 10rem;
+    }
+  }
+}

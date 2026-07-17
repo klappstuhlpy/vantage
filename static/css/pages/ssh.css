@@ -1,0 +1,124 @@
+/* SSH pages — keys/tokens and the audit log. Composition only. */
+
+@layer pages {
+  .key-name {
+    font-size: var(--fs-sm);
+    color: var(--ink-1);
+  }
+
+  .sub {
+    font-size: var(--fs-xs);
+    color: var(--ink-3);
+  }
+
+  .muted {
+    color: var(--ink-3);
+  }
+
+  /* A fingerprint is only ever copied, never read aloud — same treatment as the
+     hashes on the Sanitizer. */
+  .fp-btn {
+    padding: 0;
+    background: none;
+    border: 0;
+    border-bottom: 1px dotted var(--line-ctl);
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    color: var(--ink-2);
+    cursor: pointer;
+  }
+
+  .fp-btn:hover {
+    color: var(--ink-1);
+    border-bottom-color: var(--acc);
+  }
+
+  .algo {
+    margin-left: var(--sp-2);
+    padding: 1px var(--sp-2);
+    background: var(--bg-2);
+    border-radius: var(--r-s);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--ink-3);
+  }
+
+  /* A revoked key or expired token is history. It stays fully legible — this is
+     an audit surface — but it stops competing with the live rows. */
+  tr.is-revoked td {
+    color: var(--ink-2);
+  }
+
+  tr.is-revoked .key-name {
+    color: var(--ink-2);
+    text-decoration: line-through;
+    text-decoration-color: var(--ink-3);
+  }
+
+  .pill-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-1);
+  }
+
+  /* The audit tile is a link wearing a statistic's clothes. */
+  .stat-link {
+    cursor: pointer;
+    transition: border-color var(--dur-fast) var(--ease-out);
+  }
+
+  .stat-link:hover {
+    border-color: var(--acc);
+  }
+
+  /* The one-time token reveal (.token-box/.token-value) is not here: the account
+     page reveals a TOTP secret the same way, so it lives in components.css. */
+
+  /* =====================================================================
+     Audit
+     ===================================================================== */
+  .audit-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-3);
+    border-bottom: 1px solid var(--line-1);
+  }
+
+  .audit-search {
+    flex: 1 1 220px;
+    min-width: 0;
+  }
+
+  .field.inline {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--sp-2);
+  }
+
+  .field.inline .select {
+    width: auto;
+  }
+
+  .audit-count {
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    color: var(--ink-3);
+  }
+
+  .table td.ua {
+    max-width: 18rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--fs-xs);
+    color: var(--ink-2);
+  }
+
+  @media (max-width: 720px) {
+    .table td.ua {
+      max-width: 8rem;
+    }
+  }
+}

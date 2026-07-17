@@ -2,163 +2,183 @@
 
 {% block title %}Security | Vantage{% endblock %}
 
-{% block extra_head %}
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.30/dist/uPlot.min.css">
-<link rel="stylesheet" href="/static/css/security.css">
+{% block head %}
+<link rel="stylesheet" href="/static/vendor/uplot.min.css">
+<link rel="stylesheet" href="/static/css/pages/security.css">
 {% endblock %}
 
 {% block content %}
-<div class="page-header">
-    <h1>Security</h1>
-    <div class="range-picker" id="range-picker">
-        <button data-range="1h" class="button outline">1h</button>
-        <button data-range="6h" class="button outline">6h</button>
-        <button data-range="24h" class="button outline active">24h</button>
-        <button data-range="7d" class="button outline">7d</button>
-        <button data-range="30d" class="button outline">30d</button>
+{#
+    The capability flags reach JS as data attributes rather than an inline
+    <script> that assigns a global. Same information, no inline JS, so the CSP
+    stays nonce-free — and the flags sit on the element that actually varies
+    with them.
+#}
+<div class="page-head" id="page" data-geoip="{{ geoip_enabled }}" data-cloudflare="{{ cloudflare_enabled }}">
+    <div class="page-head-text">
+        <h1>Security</h1>
+        <p class="page-sub">Rejected requests reaching this host — who sent them, and why they were refused.</p>
+    </div>
+    <div class="page-actions">
+        <div class="segmented" id="range" role="group" aria-label="Time range">
+            <button data-value="1h" aria-selected="false">1h</button>
+            <button data-value="6h" aria-selected="false">6h</button>
+            <button data-value="24h" aria-selected="true">24h</button>
+            <button data-value="7d" aria-selected="false">7d</button>
+            <button data-value="30d" aria-selected="false">30d</button>
+        </div>
     </div>
 </div>
 
 {% if !geoip_enabled %}
-<div class="notice warning" style="margin-bottom: 1rem;">
-    GeoIP database not loaded — country / city columns will be blank.
-    Configure <code>geoip_path</code> in config.json and drop a MaxMind GeoLite2-City.mmdb there to enable.
+<div class="callout info">
+    <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#globe"/></svg>
+    <div class="callout-body">
+        <strong>Locations are unavailable.</strong>
+        Addresses are shown without a country. To resolve them, point <code>geoip_path</code> in
+        <code>config.json</code> at a MaxMind <code>GeoLite2-City.mmdb</code> file and restart Vantage.
+    </div>
 </div>
 {% endif %}
 
-<div class="metric-tiles">
-    <div class="metric-tile">
-        <div class="tile-head"><span class="tile-label">Failed logins</span></div>
-        <div class="tile-value"><span id="tile-failed-logins">—</span></div>
-        <div class="tile-sub">in window</div>
-    </div>
-    <div class="metric-tile">
-        <div class="tile-head"><span class="tile-label">Rate-limited</span></div>
-        <div class="tile-value"><span id="tile-rate-limited">—</span></div>
-        <div class="tile-sub">in window</div>
-    </div>
-    <div class="metric-tile">
-        <div class="tile-head"><span class="tile-label">Bad requests</span></div>
-        <div class="tile-value"><span id="tile-bad-requests">—</span></div>
-        <div class="tile-sub">total 4xx</div>
-    </div>
-    <div class="metric-tile">
-        <div class="tile-head"><span class="tile-label">Unique IPs</span></div>
-        <div class="tile-value"><span id="tile-unique-ips">—</span></div>
-        <div class="tile-sub">offending</div>
-    </div>
-</div>
+<section>
+    <div class="stat-grid" id="tiles"></div>
+</section>
 
-<section class="section">
-    <h2>Suspicious activity over time</h2>
-    <div class="chart-panel">
-        <div id="chart-timeline"></div>
+<section>
+    <div class="section-head">
+        <h2>Rejected requests over time</h2>
+    </div>
+    <div class="card">
+        <div class="card-body">
+            <div class="chart" id="chart-timeline"></div>
+        </div>
     </div>
 </section>
 
-<div class="grid-2">
-    <section class="section">
-        <h2>Top offending IPs</h2>
-        <div class="table-wrap">
-            <table class="data-table" id="top-ips">
-                <thead>
-                    <tr>
-                        <th>IP</th>
-                        {% if geoip_enabled %}<th>Country</th>{% endif %}
-                        <th>4xx</th>
-                    </tr>
-                </thead>
-                <tbody><tr><td colspan="3" class="muted">Loading…</td></tr></tbody>
-            </table>
+<div class="split">
+    <section>
+        <div class="section-head">
+            <h2>Top addresses</h2>
+            <span class="count-badge" id="ip-count">0</span>
+        </div>
+        <div class="card">
+            <div class="card-body flush">
+                <div class="table-wrap">
+                    <table class="table" id="top-ips">
+                        <thead>
+                            <tr>
+                                <th>Address</th>
+                                {% if geoip_enabled %}<th>Location</th>{% endif %}
+                                <th class="num">Rejected</th>
+                            </tr>
+                        </thead>
+                        <tbody id="top-ips-body"></tbody>
+                    </table>
+                </div>
+            </div>
         </div>
     </section>
 
-    <section class="section">
-        <h2>Reason breakdown</h2>
-        <div class="chart-panel">
-            <div id="reason-list" class="reason-list"></div>
+    <section>
+        <div class="section-head">
+            <h2>Why they were rejected</h2>
+        </div>
+        <div class="card">
+            <div class="card-body">
+                <div class="bars" id="reasons"></div>
+            </div>
         </div>
     </section>
 </div>
 
 {% if geoip_enabled %}
-<section class="section">
-    <h2>Country distribution</h2>
-    <div class="chart-panel">
-        <div id="country-list" class="country-list"></div>
+<section>
+    <div class="section-head">
+        <h2>Where traffic comes from</h2>
+    </div>
+    <div class="card">
+        <div class="card-body">
+            {#
+                This panel counts a *sample* — the newest 5000 requests in the
+                window, not all of them (see security.rs). Saying so is the
+                difference between a ranking and a fabricated total.
+            #}
+            <p class="panel-note" id="country-note">Ranked across the most recent requests in this range.</p>
+            <div class="bars" id="countries"></div>
+        </div>
     </div>
 </section>
 {% endif %}
 
-<section class="section">
-    <h2>Recent events</h2>
-    <div class="table-wrap">
-        <table class="data-table" id="recent-events">
-            <thead>
-                <tr>
-                    <th>When</th>
-                    <th>IP</th>
-                    {% if geoip_enabled %}<th></th>{% endif %}
-                    <th>Status</th>
-                    <th>Reason</th>
-                    <th>Path</th>
-                </tr>
-            </thead>
-            <tbody><tr><td colspan="6" class="muted">Loading…</td></tr></tbody>
-        </table>
+<section>
+    <div class="section-head">
+        <h2>Recent events</h2>
+    </div>
+    <div class="card">
+        <div class="card-body flush">
+            <div class="table-wrap">
+                <table class="table" id="recent">
+                    <thead>
+                        <tr>
+                            <th>When</th>
+                            <th>Address</th>
+                            <th>Status</th>
+                            <th>Reason</th>
+                            <th>Path</th>
+                        </tr>
+                    </thead>
+                    <tbody id="recent-body"></tbody>
+                </table>
+            </div>
+        </div>
     </div>
 </section>
 
 {% if cloudflare_enabled %}
-<section class="section" id="cf-section">
-    <h2>Cloudflare</h2>
-    <div class="metric-tiles">
-        <div class="metric-tile">
-            <div class="tile-head"><span class="tile-label">Total requests</span></div>
-            <div class="tile-value"><span id="cf-requests">—</span></div>
-            <div class="tile-sub">via CF</div>
+<section id="cf">
+    <div class="section-head">
+        <h2>Cloudflare</h2>
+        <span class="chip" id="cf-state">Loading…</span>
+    </div>
+
+    <div class="stat-grid" id="cf-tiles"></div>
+
+    <div class="card cf-chart-card">
+        <div class="card-header">
+            <h3>Traffic and threats</h3>
         </div>
-        <div class="metric-tile">
-            <div class="tile-head"><span class="tile-label">Cached</span></div>
-            <div class="tile-value"><span id="cf-cached">—</span><span class="unit">%</span></div>
-            <div class="tile-sub">of requests</div>
-        </div>
-        <div class="metric-tile">
-            <div class="tile-head"><span class="tile-label">Threats</span></div>
-            <div class="tile-value"><span id="cf-threats">—</span></div>
-            <div class="tile-sub">blocked</div>
-        </div>
-        <div class="metric-tile">
-            <div class="tile-head"><span class="tile-label">Bytes</span></div>
-            <div class="tile-value"><span id="cf-bytes">—</span></div>
-            <div class="tile-sub">served</div>
+        <div class="card-body">
+            <div class="chart" id="chart-cf"></div>
         </div>
     </div>
-    <div class="chart-panel" style="margin-top:1rem;">
-        <div class="chart-title">Cloudflare traffic + threats</div>
-        <div id="chart-cf"></div>
-    </div>
-    <h3 style="margin-top: 1.5rem;">Recent WAF events</h3>
-    <div class="table-wrap">
-        <table class="data-table" id="cf-events">
-            <thead>
-                <tr><th>When</th><th>Action</th><th>Source</th><th>Country</th><th>IP</th><th>Path</th></tr>
-            </thead>
-            <tbody><tr><td colspan="6" class="muted">Loading…</td></tr></tbody>
-        </table>
+
+    <div class="card">
+        <div class="card-header">
+            <h3>Firewall events</h3>
+        </div>
+        <div class="card-body flush">
+            <div class="table-wrap">
+                <table class="table" id="cf-events">
+                    <thead>
+                        <tr>
+                            <th>When</th>
+                            <th>Action</th>
+                            <th>Rule</th>
+                            <th>Address</th>
+                            <th>Path</th>
+                        </tr>
+                    </thead>
+                    <tbody id="cf-events-body"></tbody>
+                </table>
+            </div>
+        </div>
     </div>
 </section>
 {% endif %}
-
 {% endblock %}
 
-{% block body_end %}
-<script>
-    window.SECURITY_FLAGS = {
-        geoipEnabled: {{ geoip_enabled }},
-        cloudflareEnabled: {{ cloudflare_enabled }},
-    };
-</script>
-<script src="https://cdn.jsdelivr.net/npm/uplot@1.6.30/dist/uPlot.iife.min.js"></script>
-<script src="/static/js/security.js"></script>
+{% block scripts %}
+<script src="/static/vendor/uplot.iife.min.js"></script>
+<script type="module" src="/static/js/pages/security.js"></script>
 {% endblock %}

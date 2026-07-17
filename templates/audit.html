@@ -1,0 +1,93 @@
+{% extends "layout.html" %}
+
+{% block title %}Audit log | Vantage{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="/static/css/pages/audit.css">
+{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div class="page-head-text">
+        <h1>Audit log</h1>
+        <p class="page-sub">
+            Every change made through Vantage — who, what, from where, and whether it worked.
+        </p>
+    </div>
+</div>
+
+<noscript>
+    <div class="callout warn">
+        <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#triangle-alert"/></svg>
+        <div class="callout-body">This page needs JavaScript to search the audit log.</div>
+    </div>
+</noscript>
+
+<section>
+    <div class="card">
+        <div class="card-body log-filters" role="search">
+            <div class="input-icon log-search">
+                <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#search"/></svg>
+                <input class="input" id="q" type="search" placeholder="Search action, address, target or detail…"
+                       autocomplete="off" spellcheck="false" aria-label="Search the audit log">
+            </div>
+
+            <label class="field inline">
+                <span class="label">Area</span>
+                <select class="select" id="action" aria-label="Filter by action">
+                    <option value="">Everything</option>
+                </select>
+            </label>
+
+            <label class="field inline">
+                <span class="label">Who</span>
+                <select class="select" id="actor" aria-label="Filter by who did it">
+                    <option value="">Anyone</option>
+                </select>
+            </label>
+
+            <label class="check">
+                <input type="checkbox" id="failures">
+                <span>Only refused or failed</span>
+            </label>
+        </div>
+        <div class="card-body flush">
+            <div class="table-wrap">
+                <table class="table" id="entries">
+                    <thead>
+                        <tr>
+                            <th>When</th>
+                            <th>Who</th>
+                            <th>Action</th>
+                            <th>Target</th>
+                            <th>From</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="entries-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="load-more">
+        <button class="btn quiet" type="button" id="more" hidden>
+            <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#chevron-down"/></svg>
+            Load older
+        </button>
+    </div>
+
+    <p class="section-note" id="coverage">
+        {#
+            The retention window is rendered server-side so the page says something
+            true before the first fetch lands; the script replaces it with what is
+            actually held, which on a young install is a much shorter answer.
+        #}
+        Entries are kept for {{ retention_days }} days.
+    </p>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/js/pages/audit.js"></script>
+{% endblock %}

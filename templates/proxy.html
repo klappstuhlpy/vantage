@@ -2,20 +2,218 @@
 
 {% block title %}Proxy | Vantage{% endblock %}
 
+{% block head %}
+<link rel="stylesheet" href="/static/css/pages/proxy.css">
+{% endblock %}
+
 {% block content %}
-<div class="admin-page-header">
-    <h1>Reverse Proxy <span class="chip">{{ proxy_kind }}</span></h1>
-    <div style="display:flex; gap: 0.5rem;">
-        <button class="button outline" id="apply-btn" type="button">Apply &amp; reload</button>
-        <button class="button" id="add-btn" type="button">Add route</button>
+<div class="page-head">
+    <div class="page-head-text">
+        <h1>Proxy</h1>
+        <p class="page-sub">Which domain reaches which service. Vantage writes the config; Apply reloads it.</p>
+    </div>
+    <div class="page-actions">
+        <span class="chip" id="kind-chip">{{ proxy_kind }}</span>
+        <button class="btn quiet" id="import-btn" type="button" hidden data-destructive>
+            <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#download"/></svg>
+            Import from Cloudflare
+        </button>
+        <button class="btn quiet" id="apply-btn" type="button" data-destructive>
+            <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#refresh-cw"/></svg>
+            Apply &amp; reload
+        </button>
+        <button class="btn" id="add-btn" type="button" data-destructive>
+            <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#plus"/></svg>
+            Add route
+        </button>
     </div>
 </div>
 
-<p class="muted">Subdomain &rarr; upstream route mapping. Changes are written to config and reloaded on apply.</p>
+<noscript>
+    <div class="callout warn">
+        <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#triangle-alert"/></svg>
+        <div class="callout-body">The route manager needs JavaScript. Your routes are safe — this page just can't draw them.</div>
+    </div>
+</noscript>
 
-<div id="proxy-app">
-    <noscript>This page requires JavaScript for the route manager.</noscript>
-</div>
+<section>
+    <div class="stat-grid" id="tiles"></div>
+</section>
 
-<script src="/static/js/proxy.js"></script>
+<section>
+    <div class="section-head">
+        <h2>Routes</h2>
+        <span class="count-badge" id="route-count">0</span>
+    </div>
+    <div class="card">
+        <div class="card-body flush">
+            <div class="table-wrap">
+                <table class="table" id="routes">
+                    <thead>
+                        <tr>
+                            <th>Domain</th>
+                            <th>Upstream</th>
+                            <th>Protections</th>
+                            <th>Enabled</th>
+                            <th class="actions"></th>
+                        </tr>
+                    </thead>
+                    <tbody id="routes-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</section>
+
+{# ─── Route editor ────────────────────────────────────────────────── #}
+<dialog class="modal wide" id="editor">
+    <form id="editor-form" autocomplete="off">
+        <div class="modal-header">
+            <span class="modal-title" id="editor-title">Add route</span>
+            <button class="btn sm ghost icon-only" type="button" data-close aria-label="Close">
+                <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#x"/></svg>
+            </button>
+        </div>
+
+        <div class="modal-body">
+            <input type="hidden" id="f-id">
+
+            <div class="field">
+                <label for="f-subdomain">Domain</label>
+                <input class="input mono" id="f-subdomain" required data-autofocus placeholder="app.example.com">
+                <span class="field-hint">The hostname visitors will use. No scheme, no path.</span>
+            </div>
+
+            <fieldset class="field-group">
+                <legend>Upstream — where the traffic goes</legend>
+                <div class="field-row">
+                    <div class="field">
+                        <label for="f-container">Container <span class="label-optional">(optional)</span></label>
+                        <select class="select" id="f-container">
+                            <option value="">Not a container</option>
+                        </select>
+                        <span class="field-hint">Picking one fills the host in for you.</span>
+                    </div>
+                    <div class="field">
+                        <label for="f-scheme">Scheme</label>
+                        <select class="select" id="f-scheme">
+                            <option value="http">http</option>
+                            <option value="https">https</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="field-row">
+                    <div class="field">
+                        <label for="f-host">Host</label>
+                        <input class="input mono" id="f-host" required placeholder="127.0.0.1">
+                    </div>
+                    <div class="field">
+                        <label for="f-port">Port</label>
+                        <input class="input mono" id="f-port" type="number" required min="1" max="65535" placeholder="8080">
+                    </div>
+                </div>
+            </fieldset>
+
+            <fieldset class="field-group">
+                <legend>TLS</legend>
+                <label class="switch">
+                    <input type="checkbox" id="f-ssl">
+                    <span class="switch-track"></span>
+                    <span class="switch-label">Manage the certificate for this domain</span>
+                </label>
+                <label class="switch">
+                    <input type="checkbox" id="f-cf">
+                    <span class="switch-track"></span>
+                    <span class="switch-label">Proxy through Cloudflare</span>
+                </label>
+            </fieldset>
+
+            <fieldset class="field-group">
+                <legend>Protections <span class="label-optional">(optional)</span></legend>
+
+                <div class="field-row">
+                    <div class="field">
+                        <label for="f-auth-user">Basic-auth user</label>
+                        <input class="input mono" id="f-auth-user" autocomplete="off" placeholder="admin">
+                    </div>
+                    <div class="field">
+                        <label for="f-auth-pass">Password</label>
+                        <input class="input mono" id="f-auth-pass" type="password" autocomplete="new-password">
+                        {#
+                            The hash is never sent back to the browser (only the
+                            fact that one exists), so an edit cannot pre-fill
+                            this — and leaving it blank must therefore mean
+                            "keep the current password", not "remove it".
+                        #}
+                        <span class="field-hint" id="auth-hint">Sets the password for this route.</span>
+                    </div>
+                </div>
+
+                <div class="field">
+                    <label for="f-rate">Rate limit <span class="label-optional">(optional)</span></label>
+                    <input class="input mono" id="f-rate" type="number" min="1" max="100000" placeholder="none">
+                    <span class="field-hint">Requests per second, per client. Blank means no limit.</span>
+                </div>
+            </fieldset>
+
+            <details class="advanced">
+                <summary>
+                    <svg class="icon disclosure" aria-hidden="true"><use href="/static/icons/sprite.svg#chevron-right"/></svg>
+                    Advanced
+                </summary>
+                <div class="advanced-body">
+                    <div class="field">
+                        <label for="f-access">Access rules <span class="label-optional">(JSON)</span></label>
+                        <textarea class="textarea mono" id="f-access" rows="3" spellcheck="false" placeholder='{"allow": ["10.0.0.0/8"]}'></textarea>
+                        <span class="field-error" id="access-error" hidden></span>
+                    </div>
+                    <div class="field">
+                        <label for="f-extra">Extra config</label>
+                        <textarea class="textarea mono" id="f-extra" rows="4" spellcheck="false"
+                                  placeholder="Injected verbatim into this route's generated config block."></textarea>
+                        <span class="field-hint">Written into the generated file as-is. A syntax error here breaks the reload.</span>
+                    </div>
+                </div>
+            </details>
+
+            <label class="switch">
+                <input type="checkbox" id="f-enabled" checked>
+                <span class="switch-track"></span>
+                <span class="switch-label">Enabled — serve this route after the next apply</span>
+            </label>
+        </div>
+
+        <div class="modal-footer">
+            <button class="btn quiet" type="button" data-close>Cancel</button>
+            <button class="btn" type="submit" id="editor-save">Save route</button>
+        </div>
+    </form>
+</dialog>
+
+{# ─── Generated-config preview ────────────────────────────────────── #}
+<dialog class="modal wide" id="preview">
+    <div class="modal-header">
+        <span class="modal-title" id="preview-title">Generated config</span>
+        <button class="btn sm ghost icon-only" type="button" data-close aria-label="Close">
+            <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#x"/></svg>
+        </button>
+    </div>
+    <div class="modal-body flush">
+        <pre class="config-preview" id="preview-body"></pre>
+    </div>
+    <div class="modal-footer">
+        <span class="preview-file mono" id="preview-file"></span>
+        <div class="spacer"></div>
+        <button class="btn quiet" type="button" id="preview-copy">
+            <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#copy"/></svg>
+            Copy
+        </button>
+        <button class="btn" type="button" data-close>Close</button>
+    </div>
+</dialog>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/js/pages/proxy.js"></script>
 {% endblock %}

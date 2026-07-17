@@ -33,14 +33,21 @@ pub async fn reap_expired(state: &AppState) -> anyhow::Result<usize> {
 /// Add (`add = true`) or remove a kernel block for `ip` via the detected
 /// backend. A no-op when no backend is configured or the backend has no lockout
 /// command (e.g. `Disabled`).
-pub async fn apply_backend_block(state: &AppState, ip: &str, add: bool) {
+///
+/// Returns whether the kernel state actually changed, so a caller that told an
+/// operator "released" can be telling the truth. The old version could not: it
+/// only logged `Err` from `exec`, which is returned when the command could not
+/// be *launched* — a command that ran and failed came back `Ok` and was thrown
+/// away in silence.
+pub async fn apply_backend_block(state: &AppState, ip: &str, add: bool) -> bool {
     let Some(backend) = state.firewall_backend() else {
-        return;
+        return false;
     };
-    let Some(argv) = backend.lockout_command(ip, add) else {
-        return;
-    };
-    if let Err(e) = backend.exec(argv.clone()).await {
-        tracing::warn!(error = %e, ?argv, "firewall backend exec failed");
+    match backend.set_lockout(ip, add).await {
+        Ok(changed) => changed,
+        Err(e) => {
+            tracing::warn!(error = %e, ip, add, "firewall lockout command failed");
+            false
+        }
     }
 }
