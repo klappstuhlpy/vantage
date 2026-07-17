@@ -1,0 +1,87 @@
+services:
+  vantage:
+    container_name: vantage
+    build:
+      context: .
+      # Forward the host SSH agent into the build so cargo can fetch the private
+      # klappstuhl_me-shared git dependency over SSH. The invoking shell's agent
+      # must hold a key with read access to klappstuhlpy/klappstuhl_me-shared.
+      # Requires BuildKit: `DOCKER_BUILDKIT=1 docker compose build` (default on
+      # modern Docker). The Dockerfile consumes this via `--mount=type=ssh`.
+      ssh:
+        - default=$HOME/.ssh/id_ed25519
+    image: vantage:latest
+    restart: unless-stopped
+
+    # Host networking: the container shares the host's network namespace so
+    # the firewall backend (ufw/iptables/nftables) sees and controls the
+    # real host rules rather than an isolated container namespace.
+    # Port mappings are ignored with host networking — the app binds
+    # directly to the host's ports (default 9090, override with VANTAGE_PORT).
+    network_mode: host
+
+    volumes:
+      # Persistent data: config, database, logs.
+      # On first run the app auto-creates the config file at:
+      #   ./data/config/vantage/config.json
+      # Edit that file (see notes below) then restart the container.
+      - ./data:/data
+
+      # Docker socket – required for the container dashboard to call
+      # Docker introspection APIs (ps, inspect, logs, events).
+      # Remove this mount if you are not using the container feature.
+      - /var/run/docker.sock:/var/run/docker.sock
+
+      # Host ufw configuration and rule database. network_mode: host shares
+      # the kernel's iptables tables, but ufw reads its rule list from
+      # /etc/ufw/ and its runtime state from /var/lib/ufw/. Without these
+      # mounts `ufw status` inside the container sees the image's empty ufw
+      # install instead of the host's configured rules.
+      - /etc/ufw:/etc/ufw
+      - /var/lib/ufw:/var/lib/ufw
+
+      # Host /proc and /sys (read-only) so the live metrics dashboard
+      # reports the real machine instead of the container's cgroup view.
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+
+      # Host /home and /root so the SSH key manager can sync each user's
+      # authorized_keys file directly.
+      - /home:/host-home
+      - /root:/host-root
+
+      # Host sshd auth log (read-only) so the SSH page can populate
+      # "Last used" timestamps by tailing publickey auth events.
+      # Path varies by distro — see comments in the klappstuhl_me compose.
+      - /var/log/auth.log:/host-log/auth.log:ro
+
+    # NET_ADMIN is required so ufw/iptables/nftables commands issued from
+    # inside the container can modify the host's kernel packet filter tables.
+    cap_add:
+      - NET_ADMIN
+      - NET_BIND_SERVICE
+
+    environment:
+      HOST_PROC: "/host/proc"
+      HOST_SYS:  "/host/sys"
+      # Optional: override bind port (default 9090).
+      # VANTAGE_PORT: "9090"
+      # Optional: control log verbosity.
+      # RUST_LOG: "info"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# First-run setup
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. Start once to let the app write a default config:
+#      docker compose up -d
+#    Then stop it:
+#      docker compose down
+#
+# 2. Edit ./data/config/vantage/config.json
+#    (set exposure mode, allowed CIDRs, alert sinks, etc.)
+#
+# 3. Create the admin account (interactive prompt):
+#      docker compose run --rm vantage ./vantage admin
+#
+# 4. Start permanently:
+#      docker compose up -d
