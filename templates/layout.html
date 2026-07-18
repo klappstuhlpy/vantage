@@ -48,7 +48,10 @@
     <link rel="stylesheet" href="/static/css/shell.css">
     {% block head %}{% endblock %}
 </head>
-<body>
+{# `app-shell` is the frame's opt-in to a non-scrolling document (shell.css).
+   The standalone pages (status, auth) carry their own body class and keep
+   normal document scrolling. #}
+<body class="app-shell">
 <a class="skip-link" href="#main">Skip to content</a>
 
 <div class="app">

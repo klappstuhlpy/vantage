@@ -1,53 +1,90 @@
-//! Database console for the `/database` page — the second feature slice
-//! moved into Vantage (ADMIN_SEPARATION_PLAN Phase 4, Step C2).
+//! Database console for the `/database` page.
 //!
-//! Vantage owns a single SQLite database, its own `admin.db`, so this is a
-//! deliberately simplified port of the monolith's multi-backend console: no
-//! `requests.db`, no external PostgreSQL, no roles tab — one source, one page.
-//! (Percy's PostgreSQL is off-limits by the workspace's DB-isolation rule and
-//! was never reachable from the admin console anyway.)
+//! The page browses two kinds of database behind a single UI:
+//! - **SQLite** — Vantage's own `admin.db`, the site's `requests.db` when
+//!   `requests_db_path` is set, and anything else named in `sqlite_sources`.
+//! - **PostgreSQL** — the optional instance pointed at by `postgres_url`. Only
+//!   listed when that key is set.
 //!
-//! Safety mirrors the monolith exactly:
-//! - Safe-mode is the default. The query is first screened by the text-level
+//! Each database is addressed by an opaque *source id* of the form
+//! `sqlite:<name>` or `pg:<dbname>` (see [`Source`]). The dispatch helpers below
+//! parse that id and forward to the right backend submodule, so the route layer
+//! and the frontend never special-case a backend.
+//!
+//! ## Where a database can come from
+//!
+//! Only from `config.json`. A SQLite source id is resolved by *looking its name
+//! up in the catalog the config produced* — never by joining the caller's string
+//! onto a directory — so no request can address a file the operator did not
+//! name, and there is no path to traverse. This is the same rule the alert sinks
+//! and `spotlight_scripts` follow, and for the same reason: the address is the
+//! credential. A console that let an admin type a path would be a file-read
+//! primitive for anything the process can open.
+//!
+//! ## Safety
+//!
+//! - Safe mode is the default. A query is first screened by the text-level
 //!   [`is_safe_query`] prefilter (rejects obvious writes with a friendly
-//!   message), then the engine enforces read-only-ness via `PRAGMA
-//!   query_only = ON` on the connection.
-//! - Danger-mode skips both layers and is only reachable through an admin-only
-//!   checkbox plus an explicit confirmation in the UI.
-//!
-//! Rather than borrow a connection from the live pool (which would contend with
-//! the running app, and where a per-connection `query_only` pragma would leak
-//! into other pooled connections), each request opens a fresh short-lived
-//! `rusqlite::Connection` to the db file and drops it when done.
+//!   message), then the engine enforces read-only-ness for real: Postgres via
+//!   `BEGIN TRANSACTION READ ONLY`, SQLite via `PRAGMA query_only = ON`. The
+//!   prefilter is the error message; the engine is the guarantee.
+//! - Danger mode skips both layers on both backends and is only reachable
+//!   through an explicit confirmation in the UI. On Postgres that means a
+//!   `DROP TABLE` against a database Vantage does not own, so the confirmation
+//!   names the source.
+//! - Every query is audited, including the ones safe mode refused.
 
+pub mod postgres;
 pub mod routes;
 mod safety;
+pub mod sqlite;
 
 pub use safety::is_safe_query;
 
-use std::path::{Path, PathBuf};
-use std::time::Instant;
-
-use rusqlite::{types::ValueRef, Connection};
 use serde::Serialize;
 
+use crate::AppState;
+
 /// Hard cap on the number of rows returned by the query runner so a
-/// `SELECT * FROM big_table` doesn't OOM the browser tab.
+/// `SELECT * FROM big_table` doesn't OOM the browser tab. Shared by both
+/// backends.
 pub const ROW_LIMIT: usize = 1000;
 
-/// Metadata for the single browsable database.
+// ─── Shared catalog/result shapes ────────────────────────────────────
+
+/// One entry in the database picker.
 #[derive(Debug, Serialize)]
 pub struct DatabaseInfo {
+    /// Opaque source id (`"sqlite:admin"`, `"pg:postgres"`, …). This is what the
+    /// frontend sends back to the table/query endpoints.
+    pub id: String,
+    /// Display name (`"admin"`, `"requests"`, or the Postgres database name).
     pub name: String,
+    /// Backend kind — `"sqlite"` or `"postgres"`. The UI uses this to hide
+    /// Postgres-only features (the Roles tab) for SQLite sources.
     pub kind: &'static str,
+    pub owner: String,
+    pub encoding: String,
     /// On-disk size as a human string (`"42 MB"`).
     pub size_pretty: String,
 }
 
 #[derive(Debug, Serialize)]
 pub struct TableInfo {
+    pub schema: String,
     pub name: String,
+    pub owner: String,
     pub row_estimate: i64,
+    pub size_pretty: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RoleInfo {
+    pub name: String,
+    pub superuser: bool,
+    pub can_login: bool,
+    pub can_create_db: bool,
+    pub can_create_role: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -61,126 +98,83 @@ pub struct QueryResult {
     pub truncated: bool,
 }
 
-/// Opens a fresh connection to `path`. When `read_only` is set, `query_only` is
-/// engaged so the engine rejects any write on this connection — the connection
-/// is short-lived and dropped after the request, so there is nothing to reset.
-fn open(path: &Path, read_only: bool) -> anyhow::Result<Connection> {
-    let conn = Connection::open(path)?;
-    if read_only {
-        conn.execute_batch("PRAGMA query_only = ON;")?;
-    }
-    Ok(conn)
+// ─── Source addressing ───────────────────────────────────────────────
+
+/// A parsed database source id.
+#[derive(Debug)]
+pub enum Source {
+    /// One of the configured SQLite databases, by name.
+    Sqlite(String),
+    /// A database on the configured Postgres instance, by name.
+    Postgres(String),
 }
 
-/// Describes `admin.db` for the page header (name + on-disk size).
-pub fn database_info(path: &Path) -> DatabaseInfo {
-    let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
-    DatabaseInfo {
-        name: "admin".into(),
-        kind: "sqlite",
-        size_pretty: human_size(size),
-    }
-}
-
-/// Lists the user tables in `admin.db` with an exact row count (the admin
-/// database is small enough that `COUNT(*)` is cheap). Runs on a blocking
-/// thread since `rusqlite` is synchronous.
-pub async fn list_tables(path: PathBuf) -> anyhow::Result<Vec<TableInfo>> {
-    tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<TableInfo>> {
-        let conn = open(&path, true)?;
-        let names: Vec<String> = {
-            let mut stmt = conn.prepare(
-                "SELECT name FROM sqlite_master
-                 WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
-                 ORDER BY name",
-            )?;
-            let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
-            rows.collect::<rusqlite::Result<_>>()?
-        };
-
-        let mut out = Vec::with_capacity(names.len());
-        for name in names {
-            // The identifier is double-quoted (and inner quotes doubled) so an
-            // unusual table name can't break out of the quoting.
-            let quoted = name.replace('"', "\"\"");
-            let count: i64 = conn
-                .query_row(&format!("SELECT COUNT(*) FROM \"{quoted}\""), [], |r| r.get(0))
-                .unwrap_or(0);
-            out.push(TableInfo {
-                name,
-                row_estimate: count,
-            });
+/// Parses an opaque source id (`"sqlite:admin"`, `"pg:foo"`) into a [`Source`].
+///
+/// This only splits the string. Whether the name *resolves* is the backend's
+/// question — for SQLite that is a catalog lookup, which is what keeps an
+/// arbitrary name from reaching the filesystem.
+pub fn parse_source(id: &str) -> anyhow::Result<Source> {
+    if let Some(name) = id.strip_prefix("sqlite:") {
+        if name.is_empty() {
+            anyhow::bail!("missing database name in source id");
         }
-        Ok(out)
-    })
-    .await?
-}
-
-/// Runs `sql` against `admin.db`. In safe mode the connection is opened with
-/// `query_only`, so any write is rejected by the engine before rows are touched.
-pub async fn run_query(path: PathBuf, sql: &str, safe: bool) -> anyhow::Result<QueryResult> {
-    let sql = sql.to_string();
-    tokio::task::spawn_blocking(move || -> anyhow::Result<QueryResult> {
-        let conn = open(&path, safe)?;
-        let started = Instant::now();
-
-        let mut stmt = conn.prepare(&sql)?;
-        let col_count = stmt.column_count();
-
-        // A statement with no result columns (INSERT/UPDATE/DELETE/DDL/…) must
-        // be run with `execute`, not `query`. In safe mode `query_only` makes
-        // the engine reject it before any rows are touched.
-        if col_count == 0 {
-            let affected = stmt.execute([])?;
-            return Ok(QueryResult {
-                columns: Vec::new(),
-                rows: Vec::new(),
-                row_count: affected,
-                elapsed_ms: started.elapsed().as_millis() as u64,
-                truncated: false,
-            });
+        Ok(Source::Sqlite(name.to_string()))
+    } else if let Some(db) = id.strip_prefix("pg:") {
+        if db.is_empty() {
+            anyhow::bail!("missing Postgres database name in source id");
         }
-
-        let columns: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
-
-        let mut rows_iter = stmt.query([])?;
-        let mut cells: Vec<Vec<String>> = Vec::new();
-        let mut total = 0usize;
-        while let Some(row) = rows_iter.next()? {
-            total += 1;
-            if cells.len() < ROW_LIMIT {
-                cells.push((0..col_count).map(|i| value_to_string(row, i)).collect());
-            }
-        }
-
-        Ok(QueryResult {
-            columns,
-            rows: cells,
-            row_count: total,
-            elapsed_ms: started.elapsed().as_millis() as u64,
-            truncated: total > ROW_LIMIT,
-        })
-    })
-    .await?
-}
-
-/// Coerces one SQLite cell to a display string. Blobs are summarised by length
-/// rather than dumped, so a `SELECT *` over a table with binary columns stays
-/// readable.
-fn value_to_string(row: &rusqlite::Row, idx: usize) -> String {
-    match row.get_ref(idx) {
-        Ok(ValueRef::Null) => "NULL".into(),
-        Ok(ValueRef::Integer(i)) => i.to_string(),
-        Ok(ValueRef::Real(f)) => f.to_string(),
-        Ok(ValueRef::Text(t)) => String::from_utf8_lossy(t).into_owned(),
-        Ok(ValueRef::Blob(b)) => format!("<blob: {} bytes>", b.len()),
-        Err(_) => "<error>".into(),
+        Ok(Source::Postgres(db.to_string()))
+    } else {
+        anyhow::bail!("unknown database source: {id}")
     }
 }
 
-/// Formats a byte count as a short human string (`"42 MB"`). Self-contained —
-/// the monolith's shared `backup::human_size` arrives with the backup slice.
-fn human_size(bytes: u64) -> String {
+// ─── Dispatch ────────────────────────────────────────────────────────
+
+/// Lists every browsable database: the SQLite ones first, then the Postgres
+/// databases when `postgres_url` is configured.
+///
+/// A failure reaching Postgres is logged and swallowed. The SQLite sources are
+/// always available, so a down or misconfigured Postgres must not take the whole
+/// page with it — losing the console is exactly the wrong thing to happen while
+/// you are trying to work out why a database is unreachable.
+pub async fn list_databases(state: &AppState) -> anyhow::Result<Vec<DatabaseInfo>> {
+    let mut out = sqlite::list_databases(state);
+    if state.config.postgres_url.is_some() {
+        match postgres::list_databases(state).await {
+            Ok(dbs) => out.extend(dbs),
+            Err(e) => tracing::warn!(error = %e, "could not list Postgres databases"),
+        }
+    }
+    Ok(out)
+}
+
+/// Lists the tables in the database identified by `source`.
+pub async fn list_tables(state: &AppState, source: &str) -> anyhow::Result<Vec<TableInfo>> {
+    match parse_source(source)? {
+        Source::Sqlite(name) => sqlite::list_tables(state, &name).await,
+        Source::Postgres(db) => postgres::list_tables(state, &db).await,
+    }
+}
+
+/// Lists Postgres roles. SQLite has no role system, so this is only meaningful
+/// for Postgres sources and the UI hides the tab for the others.
+pub async fn list_roles(state: &AppState) -> anyhow::Result<Vec<RoleInfo>> {
+    postgres::list_roles(state).await
+}
+
+/// Runs `sql` against the database identified by `source`. When `safe` is true
+/// the backend enforces read-only execution at the engine level.
+pub async fn run_query(state: &AppState, source: &str, sql: &str, safe: bool) -> anyhow::Result<QueryResult> {
+    match parse_source(source)? {
+        Source::Sqlite(name) => sqlite::run_query(state, &name, sql, safe).await,
+        Source::Postgres(db) => postgres::run_query(state, &db, sql, safe).await,
+    }
+}
+
+/// Formats a byte count as a short human string (`"42 MB"`).
+pub fn human_size(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
     if bytes == 0 {
         return "0 B".into();
@@ -202,74 +196,20 @@ fn human_size(bytes: u64) -> String {
 mod tests {
     use super::*;
 
-    /// Writes a small SQLite database to a throwaway temp file and returns its
-    /// path (its own file — the query runner opens fresh connections to it, so a
-    /// shared `:memory:` handle would not work here).
-    fn seed_db() -> PathBuf {
-        use std::sync::atomic::{AtomicU32, Ordering};
-        static COUNTER: AtomicU32 = AtomicU32::new(0);
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir();
-        let path = dir.join(format!("vantage-dbadmin-test-{}-{n}.db", std::process::id()));
-        let _ = std::fs::remove_file(&path);
-        let conn = Connection::open(&path).unwrap();
-        conn.execute_batch(
-            "CREATE TABLE widget(id INTEGER PRIMARY KEY, label TEXT, blob BLOB);
-             INSERT INTO widget(label, blob) VALUES ('one', x'0011'), ('two', NULL);",
-        )
-        .unwrap();
-        path
+    #[test]
+    fn source_ids_round_trip() {
+        assert!(matches!(parse_source("sqlite:admin").unwrap(), Source::Sqlite(n) if n == "admin"));
+        assert!(matches!(parse_source("pg:percy").unwrap(), Source::Postgres(d) if d == "percy"));
     }
 
-    #[tokio::test]
-    async fn lists_tables_with_counts() {
-        let path = seed_db();
-        let tables = list_tables(path.clone()).await.unwrap();
-        std::fs::remove_file(&path).ok();
-
-        let widget = tables.iter().find(|t| t.name == "widget").expect("widget table listed");
-        assert_eq!(widget.row_estimate, 2);
-    }
-
-    #[tokio::test]
-    async fn read_query_returns_rows_and_stringifies_cells() {
-        let path = seed_db();
-        let result = run_query(path.clone(), "SELECT id, label, blob FROM widget ORDER BY id", true)
-            .await
-            .unwrap();
-        std::fs::remove_file(&path).ok();
-
-        assert_eq!(result.columns, vec!["id", "label", "blob"]);
-        assert_eq!(result.row_count, 2);
-        assert_eq!(result.rows[0], vec!["1", "one", "<blob: 2 bytes>"]);
-        assert_eq!(result.rows[1], vec!["2", "two", "NULL"]);
-        assert!(!result.truncated);
-    }
-
-    /// Safe-mode opens the connection with `query_only`, so even a write that
-    /// slips past the text prefilter is refused by the engine.
-    #[tokio::test]
-    async fn safe_mode_blocks_writes_at_the_engine() {
-        let path = seed_db();
-        let err = run_query(path.clone(), "DELETE FROM widget", true).await;
-        std::fs::remove_file(&path).ok();
-        assert!(err.is_err(), "query_only must reject the write");
-    }
-
-    /// Danger-mode (safe = false) actually mutates the database.
-    #[tokio::test]
-    async fn danger_mode_permits_writes() {
-        let path = seed_db();
-        let write = run_query(path.clone(), "DELETE FROM widget WHERE id = 1", false)
-            .await
-            .unwrap();
-        assert_eq!(write.row_count, 1, "one row affected");
-
-        let remaining = run_query(path.clone(), "SELECT COUNT(*) FROM widget", true)
-            .await
-            .unwrap();
-        std::fs::remove_file(&path).ok();
-        assert_eq!(remaining.rows[0][0], "1");
+    /// A malformed or unprefixed id is refused rather than guessed at — the id
+    /// is the only thing standing between the caller and a backend.
+    #[test]
+    fn unknown_or_empty_sources_are_refused() {
+        assert!(parse_source("admin").is_err());
+        assert!(parse_source("mysql:foo").is_err());
+        assert!(parse_source("sqlite:").is_err());
+        assert!(parse_source("pg:").is_err());
     }
 
     #[test]

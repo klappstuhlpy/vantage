@@ -194,7 +194,10 @@ export async function withLoading(btn, fn, { errorTitle } = {}) {
 let scrollLocks = 0;
 let savedPadRight = '';
 
-const scrollport = () => document.querySelector('.main');
+/* `.main` on a shell page; the document elsewhere. The standalone pages (login,
+   status) have no `.main`, so locking used to be a no-op there and their modals
+   scrolled the page behind them. */
+const scrollport = () => document.querySelector('.main') || document.documentElement;
 
 export function lockScroll() {
   const el = scrollport();

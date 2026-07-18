@@ -175,6 +175,18 @@ pub struct ProxyConfig {
     pub reload_command: Option<String>,
 }
 
+/// One extra SQLite file exposed in the database console (`sqlite_sources`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SqliteSource {
+    /// Display name, and the `sqlite:<name>` half of the source id. Must not
+    /// collide with the built-in `admin` or `requests` sources — a duplicate is
+    /// dropped with a warning at catalog build time rather than shadowing them.
+    pub name: String,
+    /// Path to the `.db` file. Opened fresh per request, read-only unless the
+    /// operator turns off safe mode.
+    pub path: std::path::PathBuf,
+}
+
 /// Cloudflare API credentials (for Tunnel API mode and DNS record upserts).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CloudflareConfig {
@@ -274,6 +286,29 @@ pub struct Config {
     /// `requests_db_path` exists.
     #[serde(default)]
     pub site_logs_path: Option<std::path::PathBuf>,
+    /// Extra SQLite files to expose in the database console, beyond Vantage's
+    /// own `admin.db` and the `requests_db_path` one. Each entry is a display
+    /// name and a path.
+    ///
+    /// This list *is* the console's allowlist: a source id names an entry here,
+    /// and `dbadmin::sqlite` resolves the name against this catalog rather than
+    /// joining anything the request supplied onto a directory. Adding a database
+    /// is therefore a config edit, the same as adding an alert sink or a
+    /// spotlight script — there is deliberately no route that does it, because a
+    /// console that accepts a path is a read primitive for every file the
+    /// process can open.
+    #[serde(default)]
+    pub sqlite_sources: Vec<SqliteSource>,
+    /// Connection URL for an external PostgreSQL instance
+    /// (`postgres://user:pw@host:5432/dbname`), browsable from the database
+    /// console. Unset = the console shows only the SQLite sources.
+    ///
+    /// The console can reach every database on that instance, and in danger mode
+    /// it can write to them, so the role in this URL is the real limit on what
+    /// an admin can do here. Give it the narrowest rights that make the console
+    /// useful to you.
+    #[serde(default)]
+    pub postgres_url: Option<String>,
     /// ClamAV daemon address for the file sanitizer (e.g. `"127.0.0.1:3310"`).
     /// Unset = ClamAV scan disabled.
     #[serde(default)]
@@ -632,6 +667,8 @@ impl Config {
             sshd_auth_log_path: None,
             geoip_path: None,
             requests_db_path: None,
+            sqlite_sources: Vec::new(),
+            postgres_url: None,
             site_logs_path: None,
             clamav_addr: None,
             virustotal_api_key: None,
@@ -672,6 +709,8 @@ impl Config {
             sshd_auth_log_path: None,
             geoip_path: None,
             requests_db_path: None,
+            sqlite_sources: Vec::new(),
+            postgres_url: None,
             site_logs_path: None,
             clamav_addr: None,
             virustotal_api_key: None,

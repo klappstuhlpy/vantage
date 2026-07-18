@@ -1,6 +1,6 @@
 [package]
 name = "vantage"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "AGPL-v3"
 description = "Vantage — a security-first VPS/homelab control plane. Manage your server through a terminal-aesthetic web UI, backed by CLI."
@@ -64,6 +64,12 @@ reqwest = { version = "0.12.3", default-features = false, features = ["rustls-tl
 rustls = "0.22"
 rustls-pki-types = "1"
 tokio-rustls = "0.25"
+# PostgreSQL client for the database console's optional external instance
+# (`postgres_url`). No type-conversion features: the console drives the *simple*
+# query protocol, where the server renders every value as text, so there is no
+# per-OID decoding to opt into — see `dbadmin/postgres.rs` for why that is the
+# right protocol here.
+tokio-postgres = "0.7"
 x509-parser = "0.15"
 serde = { version = "1.0.197", features = ["derive"] }
 # The published rule-table crate for the secret scanner. Rule names are

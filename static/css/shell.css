@@ -12,6 +12,23 @@
    ========================================================================== */
 
 @layer shell {
+  /* The document itself does not scroll on a shell page — `.main` does.
+     Killing the wheel's scroll chaining (`overscroll-behavior`) stopped the
+     *gesture* from dragging the document, but the document kept its scrollable
+     overflow: the scrollbar stayed, showing a blank band under the frame, and
+     dragging that scrollbar still moved the page. Overflow has to actually be
+     gone, not merely unreachable by one input method.
+     `overflow: hidden` on the body propagates to the viewport (the body is the
+     one element for which it does, as long as <html> stays `visible`), so this
+     removes the scrollbar rather than clipping anything the frame renders —
+     the frame is exactly one viewport tall regardless. Scoped to the shell's
+     body class so the standalone pages (status, auth) still scroll normally. */
+  body.app-shell {
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+  }
+
   /* The frame is exactly one viewport tall and never scrolls. Only `.main`
      scrolls, and it scrolls inside itself.
 

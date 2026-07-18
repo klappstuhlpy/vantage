@@ -260,6 +260,12 @@
   .is-editing-dashboard .widget {
     transform-origin: 50% 50%;
     animation: widget-wiggle 0.34s ease-in-out infinite;
+    /* Every card is rotating continuously while edit mode is on, and each one
+       carries a border and a shadow. Without a hint the compositor repaints all
+       of them on every frame of the wiggle, which is the load the drag then has
+       to share — the drag felt heavy because the grid underneath it already
+       was. Promoting them costs one layer per widget and there are few. */
+    will-change: transform;
   }
 
   /* Desync neighbours so it reads as organic, not a marching band. */

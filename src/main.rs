@@ -1812,6 +1812,72 @@ mod tests {
         assert_eq!(res.status(), StatusCode::NOT_FOUND, "missing snapshot should 404");
     }
 
+    /// The database console's source catalog: `sqlite:admin` is always there,
+    /// Postgres is absent until configured, and a source id nobody configured is
+    /// refused rather than resolved — the catalog is the allowlist, so this is
+    /// the boundary that keeps a console query off an arbitrary file.
+    #[tokio::test]
+    async fn the_database_console_only_addresses_configured_sources() {
+        let state = test_state().await;
+        create_admin_account(&state.db, "root", "hunter2!").await.unwrap();
+        let app = build_router(state.clone());
+        let cookie_pair = login_as_root(&app).await;
+
+        // The page renders, and it renders the picker. Askama catches a bad
+        // field at compile time but not a block that stopped being emitted.
+        let res = app
+            .clone()
+            .oneshot(get_with_cookie("/database", &cookie_pair))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let html = String::from_utf8(
+            axum::body::to_bytes(res.into_body(), usize::MAX)
+                .await
+                .unwrap()
+                .to_vec(),
+        )
+        .unwrap();
+        assert!(html.contains(r#"id="source""#), "the source picker must render");
+        assert!(
+            !html.contains(r#"id="roles-panel""#),
+            "no postgres_url means the Roles tab has nothing to show and must not render"
+        );
+
+        let res = app
+            .clone()
+            .oneshot(get_with_cookie("/database/sources", &cookie_pair))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let sources = json_body(res).await;
+        let ids: Vec<&str> = sources
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|d| d["id"].as_str().unwrap())
+            .collect();
+        assert!(ids.contains(&"sqlite:admin"), "got: {ids:?}");
+        assert!(
+            !ids.iter().any(|id| id.starts_with("pg:")),
+            "no postgres_url is configured, so no Postgres source may be offered"
+        );
+
+        // An unknown source is a 400 with a message, not a 500 and not a read.
+        for bad in ["sqlite:nope", "pg:anything", "/etc/passwd"] {
+            let res = app
+                .clone()
+                .oneshot(form_post_with_cookie(
+                    "/database/query",
+                    format!("sql=SELECT+1&source={bad}"),
+                    &cookie_pair,
+                ))
+                .await
+                .unwrap();
+            assert_eq!(res.status(), StatusCode::BAD_REQUEST, "source {bad} should be refused");
+        }
+    }
+
     /// The secrets dashboard gates to `/login`, renders the page once
     /// authenticated, and the data endpoint returns an empty findings list from
     /// the real `secret_finding` table (proving `sql/5.sql` applied). Trigger

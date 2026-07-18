@@ -1672,6 +1672,14 @@
     border-radius: 3px;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+    /* A container log holds up to MAX_LOG_ROWS (docker.js) wrapping flex rows.
+       Laying all of them out on every append is what made a busy log crawl —
+       the cost grew with the buffer, not with the lines arriving. `auto` skips
+       layout and paint for rows outside the scrollport; `contain-intrinsic-size:
+       auto` makes the browser remember each row's real height once measured, so
+       the scrollbar and the follow-to-bottom stay honest. */
+    content-visibility: auto;
+    contain-intrinsic-size: auto 21px;
   }
 
   .log-row:hover {

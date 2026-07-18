@@ -1,31 +1,129 @@
-/* Database console — browse Vantage's own tables and run ad-hoc SQL.
+/* Database console — browse the configured databases and run ad-hoc SQL.
  *
  * The whole design question on this page is safe mode. The backend runs queries
- * on a `query_only` connection unless `danger_mode` is set, so safe mode is a
- * real guarantee, not a lint — and turning it off is the single most dangerous
- * thing this UI can do. The old page made it a checkbox sitting next to Run,
- * which is a UI you can disarm by accident.
+ * read-only unless `danger_mode` is set — `PRAGMA query_only` on SQLite, a
+ * `READ ONLY` transaction on Postgres — so safe mode is a real guarantee, not a
+ * lint, and turning it off is the single most dangerous thing this UI can do.
+ * The old page made it a checkbox sitting next to Run, which is a UI you can
+ * disarm by accident.
  *
- * Here it is a switch that confirms before it disengages, and stays visibly
- * off (a persistent banner, not a subtle tint) for as long as it is off. It
- * also re-arms on reload, because "I left danger mode on last Tuesday" should
- * never be a thing that can happen.
+ * Here it is a switch that confirms before it disengages, and stays visibly off
+ * (a persistent banner, not a subtle tint) for as long as it is off. It also
+ * re-arms on reload, because "I left danger mode on last Tuesday" should never
+ * be a thing that can happen.
+ *
+ * The source picker sharpens that: once the console can reach a Postgres that
+ * Vantage does not own, "safe mode is off" is not enough on its own — *which*
+ * database is unguarded is the part that matters. So the confirmation names the
+ * source, the banner names the source, and switching source re-arms safe mode
+ * rather than carrying the disarmed state to a new target.
  */
 
 import { get, postUrlEncoded, ApiError } from '../core/api.js';
-import { h, icon, render, emptyRow, emptyState, skeletonRows, reportError, confirm, setLoading } from '../core/ui.js';
+import { h, icon, render, emptyRow, emptyState, skeletonRows, reportError, confirm, setLoading, wireSegmented } from '../core/ui.js';
 import { num } from '../core/format.js';
 
 const tablesBody = document.getElementById('tables-body');
 const tableCount = document.getElementById('table-count');
+const sourceEl = document.getElementById('source');
+const sourceMeta = document.getElementById('source-meta');
+const sourceChip = document.getElementById('source-chip-text');
 const sqlEl = document.getElementById('sql');
 const runBtn = document.getElementById('run-btn');
 const safeEl = document.getElementById('safe-mode');
 const dangerBanner = document.getElementById('danger-banner');
+const dangerSource = document.getElementById('danger-source');
 const errorEl = document.getElementById('error');
 const metaEl = document.getElementById('meta');
 const headEl = document.getElementById('result-head');
 const bodyEl = document.getElementById('result-body');
+const rolesTab = document.getElementById('roles-tab');
+const rolesPanel = document.getElementById('roles-panel');
+const queryPanel = document.getElementById('query-panel');
+
+/** Every database the server offered, by source id. */
+let sources = new Map();
+
+/** The source id every request on this page is addressed to. */
+function current() {
+  return sourceEl.value;
+}
+
+function currentInfo() {
+  return sources.get(current());
+}
+
+/** A human name for the active source, for prose (confirmations, the banner). */
+function currentLabel() {
+  const info = currentInfo();
+  if (!info) return 'this database';
+  return info.kind === 'postgres' ? `${info.name} (PostgreSQL)` : `${info.name}.db`;
+}
+
+/* =======================================================================
+   Sources
+   ======================================================================= */
+
+async function loadSources() {
+  try {
+    const list = await get('/database/sources');
+    sources = new Map(list.map((d) => [d.id, d]));
+
+    render(
+      sourceEl,
+      ...list.map((d) =>
+        h('option', { value: d.id }, d.kind === 'postgres' ? `${d.name} · postgres` : `${d.name} · sqlite`)
+      )
+    );
+
+    // Vantage's own database is the one people come here for most, so it is the
+    // landing source when it is present.
+    if (sources.has('sqlite:admin')) sourceEl.value = 'sqlite:admin';
+    syncSource();
+  } catch (e) {
+    reportError(e, "Couldn't list the databases");
+  }
+}
+
+/** Repaint everything that names or depends on the active source. */
+function syncSource() {
+  const info = currentInfo();
+  const isPg = info?.kind === 'postgres';
+
+  sourceChip.textContent = info ? `${info.name} · ${info.size_pretty}` : '—';
+  sourceMeta.textContent = info ? [info.kind, isPg ? `owner ${info.owner}` : null, info.encoding].filter(Boolean).join(' · ') : '';
+  dangerSource.textContent = currentLabel();
+
+  // SQLite has no roles, so the tab is meaningless for those sources. Hiding it
+  // rather than showing an empty table keeps the page honest about what the
+  // backend can actually answer.
+  if (rolesTab) {
+    rolesTab.hidden = !isPg;
+    if (!isPg && !rolesPanel.hidden) showPanel('query');
+  }
+
+  // A sensible opening query per backend: `sqlite_master` does not exist on
+  // Postgres, and leaving the old one in the box would just fail on first Run.
+  const stale = !sqlEl.dataset.touched;
+  if (stale) {
+    sqlEl.value = isPg
+      ? "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public';"
+      : "SELECT name FROM sqlite_master WHERE type='table';";
+  }
+}
+
+sourceEl.addEventListener('change', () => {
+  // Danger mode does not follow you to another database. It was granted for the
+  // source you were looking at, and silently re-pointing an unguarded console at
+  // a production Postgres is precisely the accident this page exists to prevent.
+  if (!safeEl.checked) {
+    safeEl.checked = true;
+    syncSafeMode();
+  }
+  syncSource();
+  clearResult();
+  loadTables();
+});
 
 /* =======================================================================
    Catalog
@@ -34,13 +132,15 @@ const bodyEl = document.getElementById('result-body');
 async function loadTables() {
   render(tablesBody, ...skeletonRows(2, 6));
   try {
-    const tables = await get('/database/tables');
+    const tables = await get(`/database/tables?source=${encodeURIComponent(current())}`);
     tableCount.textContent = num(tables.length);
 
     if (!tables.length) {
       render(tablesBody, emptyRow(2, 'No tables.'));
       return;
     }
+
+    const isPg = currentInfo()?.kind === 'postgres';
 
     render(
       tablesBody,
@@ -56,21 +156,36 @@ async function loadTables() {
               {
                 class: 'table-link',
                 type: 'button',
+                // Postgres puts the same table name in several schemas, so the
+                // list has to say which one — but only where that is a real
+                // distinction. Every SQLite table is in `main`.
+                title: isPg ? `${t.schema}.${t.name} · owner ${t.owner} · ${t.size_pretty}` : t.name,
                 // Browsing a table is the most common thing anyone does here,
                 // and typing the SELECT by hand every time is friction with no
-                // purpose. The identifier is quoted because a table may be
-                // named after a keyword.
+                // purpose. Identifiers are quoted because a table may be named
+                // after a keyword — and quoting is per-part, so a dot in a name
+                // cannot turn into a schema separator.
                 onclick: () => {
-                  sqlEl.value = `SELECT * FROM "${t.name}" LIMIT 100;`;
+                  const target = isPg ? `"${t.schema}"."${t.name}"` : `"${t.name}"`;
+                  sqlEl.value = `SELECT * FROM ${target} LIMIT 100;`;
+                  sqlEl.dataset.touched = '1';
                   run();
                 },
               },
-              t.name
+              isPg && t.schema !== 'public' ? `${t.schema}.${t.name}` : t.name
             )
           ),
-          // "Estimate" is the server's word (row_estimate) and it is honest:
-          // it comes from the query planner's statistics, not a COUNT(*).
-          h('td', { class: 'num mono dim', title: 'Estimated from the table statistics, not counted' }, num(t.row_estimate))
+          // On Postgres this is the planner's estimate (n_live_tup), on SQLite
+          // an exact COUNT(*). The title says which, rather than one label
+          // quietly meaning two things.
+          h(
+            'td',
+            {
+              class: 'num mono dim',
+              title: isPg ? 'Estimated from the table statistics, not counted' : 'Counted exactly',
+            },
+            num(t.row_estimate)
+          )
         )
       )
     );
@@ -79,6 +194,59 @@ async function loadTables() {
     render(tablesBody, emptyRow(2, 'Unavailable.'));
   }
 }
+
+/* =======================================================================
+   Roles (Postgres only)
+   ======================================================================= */
+
+const yesNo = (on) => h('span', { class: on ? 'pill warn' : 'pill' }, on ? 'yes' : 'no');
+
+async function loadRoles() {
+  const body = document.getElementById('roles-body');
+  render(body, ...skeletonRows(5, 5));
+  try {
+    const roles = await get('/database/roles');
+    document.getElementById('role-count').textContent = num(roles.length);
+
+    if (!roles.length) {
+      render(body, emptyRow(5, 'No roles.'));
+      return;
+    }
+
+    render(
+      body,
+      ...roles.map((r) =>
+        h(
+          'tr',
+          {},
+          h('td', { class: 'mono' }, r.name),
+          // A superuser and a login-capable role are the two facts on this page
+          // worth spotting from across the room, so they read as warnings.
+          h('td', {}, yesNo(r.superuser)),
+          h('td', {}, yesNo(r.can_login)),
+          h('td', {}, yesNo(r.can_create_db)),
+          h('td', {}, yesNo(r.can_create_role))
+        )
+      )
+    );
+  } catch (e) {
+    reportError(e, "Couldn't list the roles");
+    render(body, emptyRow(5, 'Unavailable.'));
+  }
+}
+
+/* =======================================================================
+   Tabs
+   ======================================================================= */
+
+function showPanel(which) {
+  queryPanel.hidden = which !== 'query';
+  if (rolesPanel) rolesPanel.hidden = which !== 'roles';
+  if (which === 'roles') loadRoles();
+}
+
+const tabsEl = document.getElementById('db-tabs');
+if (tabsEl) wireSegmented(tabsEl, showPanel);
 
 /* =======================================================================
    Safe mode
@@ -94,11 +262,17 @@ safeEl.addEventListener('change', async () => {
     return;
   }
 
-  // Unchecking means "let me write to the live database". Ask, and default to no.
+  // Unchecking means "let me write to the live database". Ask, name the target,
+  // and default to no. The target is in the question because the answer differs:
+  // an unguarded query against admin.db costs you Vantage, one against a
+  // production Postgres costs you the thing Vantage was watching.
+  const info = currentInfo();
   const ok = await confirm({
-    title: 'Turn off safe mode?',
+    title: `Turn off safe mode for ${currentLabel()}?`,
     message:
-      "Queries will run on a read/write connection against Vantage's live database. A mistaken UPDATE or DROP takes effect immediately and cannot be undone from here. Safe mode comes back on when you reload the page.",
+      `Queries will run unguarded against ${currentLabel()}` +
+      (info?.kind === 'postgres' ? ', an external PostgreSQL instance Vantage does not own' : '') +
+      '. A mistaken UPDATE or DROP takes effect immediately and cannot be undone from here. Safe mode comes back on when you reload the page or switch database.',
     confirmLabel: 'Turn it off',
     cancelLabel: 'Keep it on',
     danger: true,
@@ -195,7 +369,7 @@ async function run() {
   clearResult();
 
   try {
-    const r = await postUrlEncoded('/database/query', { sql, danger_mode: !safeEl.checked });
+    const r = await postUrlEncoded('/database/query', { sql, source: current(), danger_mode: !safeEl.checked });
     renderResult(r);
     // A write may well have changed the row counts beside us.
     if (!safeEl.checked) loadTables();
@@ -224,5 +398,13 @@ sqlEl.addEventListener('keydown', (e) => {
   }
 });
 
+// Once the operator edits the box, the per-source default query stops
+// overwriting it — switching source must not discard SQL someone is writing.
+sqlEl.addEventListener('input', () => {
+  sqlEl.dataset.touched = '1';
+});
+
 syncSafeMode();
-loadTables();
+// The catalog first: it decides which source is active, and the table list is
+// addressed to that source.
+loadSources().then(loadTables);

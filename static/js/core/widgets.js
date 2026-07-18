@@ -265,18 +265,53 @@ function startDrag(e, card, grip) {
   let lastX = e.clientX;
   let lastY = e.clientY;
   let raf = 0;
+  let done = false;
 
   card.classList.add('is-dragging');
   // Turn the whole grid's wiggle off for the duration: the wiggle drives
   // `transform`, and the FLIP below needs `transform` free to animate.
   gridEl.classList.add('is-sorting');
+  // The lifted card is not a hit target for the whole drag. This used to be
+  // toggled off and on around each `elementFromPoint` call — two style writes
+  // and a forced hit-test rebuild on *every pointermove*, which on a 1000Hz
+  // mouse is dozens per frame. Pointer capture keeps delivering move/up to the
+  // grip regardless of `pointer-events`, so setting it once is equivalent.
+  card.style.pointerEvents = 'none';
   grip.setPointerCapture(e.pointerId);
 
-  // Position the lifted card under the pointer. Measured with its own transform
-  // cleared, so the offset is always against its real slot — that is what keeps
-  // it glued to the cursor even as reordering shifts that slot.
-  const follow = () => {
+  /* Decide where the card belongs for a pointer at (x, y), and move it there.
+     Which side of `over` to land on is read in grid order: above its row → in
+     front; on its row → the nearer horizontal half. The insert goes against a
+     *stable reference node* and bails when the card is already there — without
+     that bail the pointer sitting on `over` flips the answer every frame and
+     the widgets vibrate in place. */
+  const reorder = (x, y) => {
+    const over = document.elementFromPoint(x, y)?.closest('.widget');
+    if (!over || over === card || over.parentElement !== gridEl) return;
+
+    const r = over.getBoundingClientRect();
+    let before;
+    if (y < r.top) before = true;
+    else if (y > r.bottom) before = false;
+    else before = x < r.left + r.width / 2;
+
+    const ref = before ? over : over.nextElementSibling;
+    if (ref === card || ref === card.nextElementSibling) return; // already in place
+
+    flipSiblings(card, () => gridEl.insertBefore(card, ref));
+  };
+
+  /* One frame does the whole job: reorder against the latest pointer position,
+     then re-seat the card under it. Everything that reads layout is confined to
+     this callback, so a burst of pointermove events costs one layout pass
+     instead of one per event — pointermove itself now only records coordinates. */
+  const frame = () => {
     raf = 0;
+    if (done) return;
+    reorder(lastX, lastY);
+    // Measured with its own transform cleared, so the offset is always against
+    // its real slot — that is what keeps it glued to the cursor even as
+    // reordering shifts that slot.
     card.style.transform = 'none';
     const base = card.getBoundingClientRect();
     const tx = lastX - offX - base.left;
@@ -287,36 +322,23 @@ function startDrag(e, card, grip) {
   const onMove = (ev) => {
     lastX = ev.clientX;
     lastY = ev.clientY;
-    if (!raf) raf = requestAnimationFrame(follow);
-
-    // Hit-test the card underneath. The lifted card sits over the pointer, so
-    // hide it from the test for the one call, or it would always find itself.
-    card.style.pointerEvents = 'none';
-    const over = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('.widget');
-    card.style.pointerEvents = '';
-    if (!over || over === card || over.parentElement !== gridEl) return;
-
-    // Which side of `over` to land on, read in grid order: above its row → in
-    // front; on its row → the nearer horizontal half. Then insert against a
-    // *stable reference node* and bail when the card is already there. Without
-    // that bail the pointer sitting on `over` flips the answer every frame and
-    // the widgets vibrate in place — the "randomly get stuck" symptom.
-    const r = over.getBoundingClientRect();
-    let before;
-    if (ev.clientY < r.top) before = true;
-    else if (ev.clientY > r.bottom) before = false;
-    else before = ev.clientX < r.left + r.width / 2;
-
-    const ref = before ? over : over.nextElementSibling;
-    if (ref === card || ref === card.nextElementSibling) return; // already in place
-
-    flipSiblings(card, () => gridEl.insertBefore(card, ref));
+    if (!raf) raf = requestAnimationFrame(frame);
   };
 
-  const onUp = () => {
+  /* Idempotent, and reachable from four events. A drag that ends without this
+     running leaves `dragging` true and `is-sorting` on the grid — the grid then
+     refuses every later drag and renders frozen, which is what "randomly gets
+     stuck" looked like. `lostpointercapture` is the one that closes the gap:
+     it fires whenever the capture goes away for a reason we did not initiate
+     (the grip being removed from the DOM, the browser revoking it), where
+     pointerup/pointercancel never arrive at all. */
+  const finish = () => {
+    if (done) return;
+    done = true;
     grip.removeEventListener('pointermove', onMove);
-    grip.removeEventListener('pointerup', onUp);
-    grip.removeEventListener('pointercancel', onUp);
+    grip.removeEventListener('pointerup', finish);
+    grip.removeEventListener('pointercancel', finish);
+    grip.removeEventListener('lostpointercapture', finish);
     if (raf) cancelAnimationFrame(raf);
 
     settleDropped(card);
@@ -329,8 +351,9 @@ function startDrag(e, card, grip) {
   };
 
   grip.addEventListener('pointermove', onMove);
-  grip.addEventListener('pointerup', onUp);
-  grip.addEventListener('pointercancel', onUp);
+  grip.addEventListener('pointerup', finish);
+  grip.addEventListener('pointercancel', finish);
+  grip.addEventListener('lostpointercapture', finish);
 }
 
 /** FLIP: record where the siblings are, let `mutate` reorder the DOM, then
@@ -338,19 +361,41 @@ function startDrag(e, card, grip) {
  *  card is excluded — it is following the pointer, not the grid. */
 function flipSiblings(dragged, mutate) {
   const sibs = [...gridEl.children].filter((el) => el !== dragged);
+  // "First" is where each card *looks* right now, so an in-flight slide is
+  // measured mid-flight and continues smoothly from there.
   const first = new Map(sibs.map((el) => [el, el.getBoundingClientRect()]));
 
   mutate();
 
+  // "Last" must be the new slot with no transform applied. Reading it while a
+  // previous FLIP was still animating (which is what this did) folded that
+  // leftover transform into the delta, so every reorder during a slide
+  // compounded the error and cards drifted away from their slots and sat there
+  // looking stuck. Clearing is one write pass and reading is one read pass, so
+  // the whole reorder costs a single layout instead of one per card.
+  for (const el of sibs) {
+    el.style.transition = 'none';
+    el.style.transform = 'none';
+  }
+  const last = new Map(sibs.map((el) => [el, el.getBoundingClientRect()]));
+
+  const moved = [];
   for (const el of sibs) {
     const a = first.get(el);
-    const b = el.getBoundingClientRect();
+    const b = last.get(el);
     const dx = a.left - b.left;
     const dy = a.top - b.top;
-    if (!dx && !dy) continue;
-    el.style.transition = 'none';
+    if (!dx && !dy) {
+      el.style.transform = '';
+      continue;
+    }
     el.style.transform = `translate(${dx}px, ${dy}px)`;
-    el.offsetWidth; // flush the start position before animating from it
+    moved.push(el);
+  }
+
+  if (!moved.length) return;
+  gridEl.offsetWidth; // one flush for the whole batch, not one per card
+  for (const el of moved) {
     el.style.transition = `transform var(--dur-mid) ${DRAG_EASE}`;
     el.style.transform = '';
   }
@@ -361,7 +406,10 @@ function settleDropped(card) {
   card.style.transition = `transform var(--dur-mid) ${DRAG_EASE}`;
   card.style.transform = 'translate(0px, 0px) scale(1)';
 
-  const cleanup = () => {
+  const cleanup = (ev) => {
+    // `transitionend` bubbles: a child finishing any transition would otherwise
+    // end the settle early and snap the card home mid-flight.
+    if (ev && ev.target !== card) return;
     card.removeEventListener('transitionend', cleanup);
     card.classList.remove('is-dragging');
     gridEl.classList.remove('is-sorting'); // wiggle resumes

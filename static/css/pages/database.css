@@ -20,6 +20,22 @@
     overflow: auto;
   }
 
+  /* The picker sits above the table list in the same sticky column, so the list
+     gets the separating space rather than butting straight onto the card. */
+  .db-side-head {
+    margin-top: var(--sp-5);
+  }
+
+  /* The tab strip and the panel below it are one block. */
+  .db-main .tabs {
+    margin-bottom: var(--sp-5);
+  }
+
+  #query-panel[hidden],
+  #roles-panel[hidden] {
+    display: none;
+  }
+
   /* A table name is a link in behaviour but a button in semantics — it runs a
      query, it doesn't navigate. Styled as the former, announced as the latter. */
   .table-link {

@@ -10,12 +10,25 @@
 <div class="page-head">
     <div class="page-head-text">
         <h1>Database</h1>
-        <p class="page-sub">Browse and query Vantage's own database.</p>
+        <p class="page-sub">
+            {% if has_postgres %}
+            Browse and query Vantage's own database, the other configured SQLite files, and the external PostgreSQL instance.
+            {% else %}
+            Browse and query the configured SQLite databases. Set <code>postgres_url</code> to add a PostgreSQL instance.
+            {% endif %}
+        </p>
     </div>
     <div class="page-actions">
-        <span class="chip mono" title="The database file backing this console">
+        {#
+            The source's identity travels with the console: the chip reports
+            which database every control on this page is currently pointed at,
+            and database.js keeps it in step with the picker. On a page that can
+            DROP a table on a machine Vantage does not own, "which database am I
+            in" must never be a question you have to go and answer.
+        #}
+        <span class="chip mono" id="source-chip" title="The database this console is pointed at">
             <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#database"/></svg>
-            {{ db_name }}.db · {{ db_size }}
+            <span id="source-chip-text">…</span>
         </span>
     </div>
 </div>
@@ -23,6 +36,19 @@
 <div class="db-grid">
     <section class="db-side">
         <div class="section-head">
+            <h2>Source</h2>
+        </div>
+        <div class="card">
+            <div class="card-body">
+                <div class="field">
+                    <label class="sr-only" for="source">Database</label>
+                    <select class="select mono" id="source"></select>
+                    <span class="field-hint" id="source-meta"></span>
+                </div>
+            </div>
+        </div>
+
+        <div class="section-head db-side-head">
             <h2>Tables</h2>
             <span class="count-badge" id="table-count">0</span>
         </div>
@@ -44,61 +70,105 @@
     </section>
 
     <section class="db-main">
-        <div class="section-head">
-            <h2>Query</h2>
-            <div class="spacer"></div>
-            {#
-                Safe mode is a switch, and it is on. Turning it off is a
-                deliberate act that database.js confirms before the first
-                unguarded query — the old page's checkbox could be unticked in
-                passing, next to a Run button, with nothing in between.
-            #}
-            <label class="switch" id="safe-wrap">
-                <input type="checkbox" id="safe-mode" checked>
-                <span class="switch-track"></span>
-                <span class="switch-label">Safe mode</span>
-            </label>
+        {#
+            The Roles tab only exists for Postgres sources — SQLite has no role
+            system — so database.js shows and hides it as the source changes,
+            and it is absent entirely when no instance is configured.
+        #}
+        {% if has_postgres %}
+        <div class="tabs" id="db-tabs" role="tablist">
+            <button type="button" data-value="query" role="tab" aria-selected="true">Query</button>
+            <button type="button" data-value="roles" role="tab" aria-selected="false" id="roles-tab" hidden>Roles</button>
         </div>
+        {% endif %}
 
-        <div class="card">
-            <div class="card-body flush">
-                <label class="sr-only" for="sql">SQL query</label>
-                <textarea class="textarea mono db-sql" id="sql" spellcheck="false" autocomplete="off"
-                          rows="6">SELECT name FROM sqlite_master WHERE type='table';</textarea>
-            </div>
-
-            <div class="card-footer db-run-bar">
-                <button class="btn" id="run-btn" type="button">
-                    <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#play"/></svg>
-                    Run
-                </button>
-                <span class="kbd">Ctrl ↵</span>
+        <div id="query-panel">
+            <div class="section-head">
+                <h2>Query</h2>
                 <div class="spacer"></div>
-                <span class="db-meta" id="meta"></span>
+                {#
+                    Safe mode is a switch, and it is on. Turning it off is a
+                    deliberate act that database.js confirms before the first
+                    unguarded query — the old page's checkbox could be unticked in
+                    passing, next to a Run button, with nothing in between.
+                #}
+                <label class="switch" id="safe-wrap">
+                    <input type="checkbox" id="safe-mode" checked>
+                    <span class="switch-track"></span>
+                    <span class="switch-label">Safe mode</span>
+                </label>
             </div>
-        </div>
-
-        <div class="callout danger" id="danger-banner" hidden>
-            <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#triangle-alert"/></svg>
-            <div class="callout-body">
-                <strong>Safe mode is off.</strong>
-                Queries now run on a read/write connection. A <code>DELETE</code>, <code>DROP</code> or
-                <code>UPDATE</code> will change Vantage's own data, and nothing here will ask twice.
+    
+            <div class="card">
+                <div class="card-body flush">
+                    <label class="sr-only" for="sql">SQL query</label>
+                    <textarea class="textarea mono db-sql" id="sql" spellcheck="false" autocomplete="off"
+                              rows="6">SELECT name FROM sqlite_master WHERE type='table';</textarea>
+                </div>
+    
+                <div class="card-footer db-run-bar">
+                    <button class="btn" id="run-btn" type="button">
+                        <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#play"/></svg>
+                        Run
+                    </button>
+                    <span class="kbd">Ctrl ↵</span>
+                    <div class="spacer"></div>
+                    <span class="db-meta" id="meta"></span>
+                </div>
             </div>
-        </div>
-
-        <div id="error"></div>
-
-        <div class="card" id="result-card">
-            <div class="card-body flush">
-                <div class="table-wrap db-result-scroll">
-                    <table class="table" id="result">
-                        <thead id="result-head"></thead>
-                        <tbody id="result-body"></tbody>
-                    </table>
+    
+            <div class="callout danger" id="danger-banner" hidden>
+                <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#triangle-alert"/></svg>
+                <div class="callout-body">
+                    <strong>Safe mode is off.</strong>
+                    {# The source is named here, not just "the database" — the whole point of
+                       the picker is that the target changed, so the warning has to move with it. #}
+                    Queries now run unguarded against <code id="danger-source">this database</code>. A
+                    <code>DELETE</code>, <code>DROP</code> or <code>UPDATE</code> takes effect immediately,
+                    and nothing here will ask twice.
+                </div>
+            </div>
+    
+            <div id="error"></div>
+    
+            <div class="card" id="result-card">
+                <div class="card-body flush">
+                    <div class="table-wrap db-result-scroll">
+                        <table class="table" id="result">
+                            <thead id="result-head"></thead>
+                            <tbody id="result-body"></tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>
+
+        {% if has_postgres %}
+        <div id="roles-panel" hidden>
+            <div class="section-head">
+                <h2>Roles</h2>
+                <span class="count-badge" id="role-count">0</span>
+            </div>
+            <div class="card">
+                <div class="card-body flush">
+                    <div class="table-wrap">
+                        <table class="table" id="roles">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Superuser</th>
+                                    <th>Login</th>
+                                    <th>Create DB</th>
+                                    <th>Create role</th>
+                                </tr>
+                            </thead>
+                            <tbody id="roles-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
     </section>
 </div>
 {% endblock %}

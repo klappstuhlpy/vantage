@@ -8,10 +8,15 @@ as interpreted for an operator-facing control plane: MAJOR for a breaking change
 to the config file or a removed feature, MINOR for a new capability, PATCH for
 fixes and polish.
 
-Vantage is pre-1.0 — the config format and the exposure policy may still change
-between minor versions.
-
 ## [Unreleased]
+
+## [0.3.0] - 2026-07-18
+
+### Added
+
+- **The database console browses more than Vantage's own database again.** A picker at the top of `/database` lists every SQLite file you have configured — `admin.db`, the site's `requests.db`, and anything you add under `sqlite_sources` — plus every database on an external PostgreSQL instance once you set `postgres_url`. Postgres sources also get a Roles tab showing who can log in and who is a superuser. Databases can only be added in `config.json`: there is deliberately no way to point the console at a path from the browser.
+- Safe mode now names what it is protecting. Turning it off asks about *that* database specifically, the warning banner says which one is unguarded, and switching database turns safe mode back on rather than carrying an unguarded console over to a new target. Every query is recorded in the audit log with the database it ran against.
+- **Vantage can now be run as a container.** A published image and a `docker-compose.yml` mean you no longer have to build from source to try it on a host — the README walks through the mounts it needs to see the host it is managing.
 
 ### Changed
 
@@ -22,6 +27,10 @@ between minor versions.
 - **The Metrics page drew no charts**, failing with "Couldn't load history" — the CPU, memory, network and disk history were all unavailable rather than plotting. The charts render again.
 - **The page behind an open dialog could still be scrolled**, sliding the content out from under the dialog and exposing the blank space below it. Modals, drawers and the `Ctrl`+`K` palette now hold the page still while they are open.
 - Dashboard widgets sharing a row are now the same height, so a short widget beside a tall one no longer leaves a blank gap beneath it.
+- **Dragging a dashboard widget got stuck.** Cards could jitter in place, drift away from the slot they were heading for, or leave the whole grid frozen and refusing every later drag until the page was reloaded. Dragging is now steady from pick-up to drop, and a drag that ends in an unusual way — the pointer leaving the window, the browser taking the drag back — releases the grid properly instead of stranding it. Rearranging is also markedly smoother on a busy dashboard.
+- **A second scrollbar sat beside the page**, showing a blank band under the interface and scrolling the frame out of view when dragged. The page frame is exactly one screen tall and now says so, so only the content area scrolls.
+- Modals on the sign-in and public status pages let the page behind them scroll — those pages had never been covered by the scroll lock the rest of the interface uses.
+- On the Firewall page, the block form's fields and its submit button sat on different lines, because only one field carried a hint beneath it. The row lines up whatever the fields contain.
 
 ## [0.2.0] - 2026-07-17
 
@@ -111,6 +120,7 @@ between minor versions.
 - Repeated failed logins from the same address are throttled independently of any firewall configuration, and login timing does not reveal whether a username exists.
 - Changes to the host are made through a typed, audited boundary rather than by shelling out.
 
-[Unreleased]: https://github.com/klappstuhlpy/vantage/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/klappstuhlpy/vantage/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/klappstuhlpy/vantage/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/klappstuhlpy/vantage/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/klappstuhlpy/vantage/releases/tag/v0.1.0

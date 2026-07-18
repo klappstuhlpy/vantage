@@ -1,19 +1,49 @@
 /* Firewall page — composition only. */
 
 @layer pages {
-  /* The block form is a single row on desktop and stacks on narrow screens;
-     the submit button aligns to the inputs, not the labels above them. */
+  /* The block form is a single row on desktop and stacks on narrow screens.
+     The three fields do not all have the same parts — only "For" carries a hint
+     under its input — so aligning the row as whole boxes cannot work: `end`
+     lined the other two inputs up with the hint text, and `start` would line the
+     button up with the labels. Either way the controls sat on different lines.
+
+     Instead the form owns three explicit rows (label / control / hint) and each
+     field hands its parts straight to them via `grid-template-rows: subgrid`.
+     Every input is in row 2 because it *is* row 2, whether or not the field
+     above or beside it has a hint, and the button opts into the same row. */
   .lockout-form {
     display: grid;
     grid-template-columns: 1.2fr 1.6fr 1fr auto;
-    gap: var(--sp-3);
-    align-items: end;
+    grid-template-rows: auto auto auto;
+    /* Row gap matches `.field`'s own label→control spacing (components.css). */
+    gap: var(--sp-2) var(--sp-3);
+  }
+
+  .lockout-form > .field {
+    display: grid;
+    grid-template-rows: subgrid;
+    grid-row: 1 / span 3;
+  }
+
+  .lockout-form > .btn {
+    grid-row: 2;
   }
 
   @media (max-width: 780px) {
     .lockout-form {
       grid-template-columns: 1fr;
-      align-items: stretch;
+      grid-template-rows: none;
+      gap: var(--sp-3);
+    }
+
+    /* Stacked: each field goes back to being its own box in the flow. */
+    .lockout-form > .field {
+      display: flex;
+      grid-row: auto;
+    }
+
+    .lockout-form > .btn {
+      grid-row: auto;
     }
   }
 
