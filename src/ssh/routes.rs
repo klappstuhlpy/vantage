@@ -426,7 +426,7 @@ async fn list_tokens(
         .db
         .call(|conn| {
             let mut stmt = conn.prepare_cached(
-                "SELECT id, account_id, token_hash, label, scopes,
+                "SELECT id, account_id, label, scopes,
                         expires_at, created_at, used_at, revoked_at
                  FROM ssh_token ORDER BY created_at DESC",
             )?;

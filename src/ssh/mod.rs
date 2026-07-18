@@ -114,9 +114,6 @@ impl SshKey {
 pub struct SshToken {
     pub id: i64,
     pub account_id: i64,
-    /// SHA-256 of the raw token — never expose plaintext after creation.
-    #[serde(skip_serializing)]
-    pub token_hash: String,
     pub label: String,
     /// Comma-separated scope list (`""` = full access, same semantics as `Session.scopes`).
     pub scopes: String,
@@ -144,7 +141,6 @@ impl SshToken {
         Ok(Self {
             id: row.get("id")?,
             account_id: row.get("account_id")?,
-            token_hash: row.get("token_hash")?,
             label: row.get("label")?,
             scopes: row.get("scopes")?,
             expires_at: row.get("expires_at")?,
@@ -309,6 +305,12 @@ fn target_home_dir(user: &str) -> std::path::PathBuf {
 }
 
 /// Errors `ensure_user_ssh_dir` can return.
+///
+/// `MountMissing` and `UserNotFound` are only constructed on the Unix
+/// production path (see the `#[cfg(unix)]` impl below); the non-Unix dev stub
+/// returns `Ok` and never builds them, so the compiler flags them as dead there.
+/// Silence that only off-Unix — on Linux the lint stays live.
+#[cfg_attr(not(unix), allow(dead_code))]
 #[derive(Debug, thiserror::Error)]
 pub enum PrepareError {
     /// The bind-mount parent (`/host-home` or `/host-root`) doesn't exist —
