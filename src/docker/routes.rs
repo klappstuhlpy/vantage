@@ -519,8 +519,11 @@ async fn container_logs_sse(
 
     type LogStream = std::pin::Pin<Box<dyn futures_util::Stream<Item = Result<Event, Infallible>> + Send>>;
 
+    // `--timestamps` prefixes every line with an RFC3339Nano stamp. The frontend
+    // splits it off and renders it as a dim gutter column, so each line — however
+    // the container formats its own output — gets one consistent timestamp.
     let mut child = HostCommand::new(Tool::Docker)
-        .args(["logs", "--follow", "--tail", "200", &cfg.identifier])
+        .args(["logs", "--follow", "--timestamps", "--tail", "200", &cfg.identifier])
         .spawn_piped()
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 

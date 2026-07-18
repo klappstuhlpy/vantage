@@ -15,7 +15,10 @@
     display: grid;
     grid-template-columns: repeat(12, 1fr);
     gap: var(--sp-3);
-    align-items: start;
+    /* `stretch` (not `start`) so every widget fills the height of its row —
+       a short widget next to a tall one grows to match instead of leaving a
+       blank gap below itself. */
+    align-items: stretch;
   }
 
   .widget {

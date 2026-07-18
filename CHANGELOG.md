@@ -13,6 +13,16 @@ between minor versions.
 
 ## [Unreleased]
 
+### Changed
+
+- **The container log console reads far better and remembers its size.** Every line is now split into a timestamp, a colour-coded level, and the message — with warning and error lines tinted so they stand out while scrolling — instead of one flat grey stream, and a chatty container no longer makes the window stutter as lines pour in. You can drag the window to whatever size suits, and it reopens the way you left it.
+
+### Fixed
+
+- **The Metrics page drew no charts**, failing with "Couldn't load history" — the CPU, memory, network and disk history were all unavailable rather than plotting. The charts render again.
+- **The page behind an open dialog could still be scrolled**, sliding the content out from under the dialog and exposing the blank space below it. Modals, drawers and the `Ctrl`+`K` palette now hold the page still while they are open.
+- Dashboard widgets sharing a row are now the same height, so a short widget beside a tall one no longer leaves a blank gap beneath it.
+
 ## [0.2.0] - 2026-07-17
 
 ### Changed

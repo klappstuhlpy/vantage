@@ -220,13 +220,52 @@
   }
 
   /* =====================================================================
-     Log console
+     Log console — a resizable terminal window.
+
+     The dialog carries the size (dragged by the user, persisted by docker.js),
+     so it is a flex column whose body and terminal grow to fill whatever height
+     the corner grip is dragged to.
      ===================================================================== */
+  .modal.log-modal {
+    width: min(1040px, calc(100vw - var(--sp-5) * 2));
+    height: min(72vh, 760px);
+    min-width: 460px;
+    min-height: 300px;
+    max-width: calc(100vw - var(--sp-5) * 2);
+    max-height: calc(100vh - var(--sp-6) * 2);
+    overflow: hidden; /* required before the browser will draw a resize grip */
+    resize: both;
+  }
+
+  /* Only stretch to a flex column while open — a bare `display: flex` would beat
+     the UA's `dialog:not([open]) { display: none }` and leak the modal onto the
+     page when it should be closed. */
+  .modal.log-modal[open] {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .modal.log-modal .modal-body {
+    flex: 1;
+    min-height: 0; /* let the terminal scroll instead of pushing the footer off */
+  }
+
   #log-terminal {
     border: 0;
     border-radius: 0;
-    height: 58vh;
+    flex: 1;
+    min-height: 0;
+    height: auto;
     max-height: none;
+    /* Isolate the log's frequent repaints from the rest of the modal. */
+    contain: content;
+  }
+
+  @media (max-width: 720px) {
+    .modal.log-modal {
+      min-width: 0;
+      resize: vertical;
+    }
   }
 
   @media (max-width: 720px) {

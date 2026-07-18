@@ -182,6 +182,45 @@ export async function withLoading(btn, fn, { errorTitle } = {}) {
 }
 
 /* =======================================================================
+   Scroll lock — freeze the page behind an overlay
+
+   The app's scrollport is `.main`, not the document (see shell.css). A native
+   modal <dialog> and a drawer both leave that scrollport free to scroll, so the
+   page slides behind the overlay and exposes the empty space below the content.
+   Every overlay locks `.main` while it is open; the count keeps nested overlays
+   (a confirm on top of a drawer) from unlocking early.
+   ======================================================================= */
+
+let scrollLocks = 0;
+let savedPadRight = '';
+
+const scrollport = () => document.querySelector('.main');
+
+export function lockScroll() {
+  const el = scrollport();
+  if (!el) return;
+  if (scrollLocks === 0) {
+    // Reserve the width the scrollbar occupied so the content doesn't jump right
+    // when it disappears.
+    const gutter = el.offsetWidth - el.clientWidth;
+    savedPadRight = el.style.paddingRight;
+    if (gutter > 0) el.style.paddingRight = `${gutter}px`;
+    el.style.overflow = 'hidden';
+  }
+  scrollLocks++;
+}
+
+export function unlockScroll() {
+  const el = scrollport();
+  if (!el) return;
+  scrollLocks = Math.max(0, scrollLocks - 1);
+  if (scrollLocks === 0) {
+    el.style.overflow = '';
+    el.style.paddingRight = savedPadRight;
+  }
+}
+
+/* =======================================================================
    Modal — thin wrapper over <dialog>
    ======================================================================= */
 
@@ -212,7 +251,10 @@ export function openModal(dialog, { onClose } = {}) {
 
   dialog._onClose = onClose;
   dialog.classList.remove('is-closing');
-  if (!dialog.open) dialog.showModal();
+  if (!dialog.open) {
+    dialog.showModal();
+    lockScroll();
+  }
 
   // Focus the first meaningful control, not the close button.
   const target = dialog.querySelector('[data-autofocus]') || dialog.querySelector('.modal-body input, .modal-body select, .modal-body textarea');
@@ -226,6 +268,7 @@ export function closeModal(dialog) {
   const done = () => {
     dialog.classList.remove('is-closing');
     dialog.close();
+    unlockScroll();
     dialog._onClose?.();
   };
   let fired = false;
@@ -290,6 +333,7 @@ export function confirm({ title, message, detail = null, confirmLabel = 'Confirm
    ======================================================================= */
 
 export function openDrawer(drawer) {
+  const wasOpen = drawer.classList.contains('is-open');
   let scrim = drawer.previousElementSibling;
   if (!scrim?.classList.contains('drawer-scrim')) {
     scrim = h('div', { class: 'drawer-scrim', onclick: () => closeDrawer(drawer) });
@@ -307,14 +351,18 @@ export function openDrawer(drawer) {
   // Remember who opened it so focus can go home on close.
   drawer._restore = document.activeElement;
   (drawer.querySelector('[data-autofocus]') || drawer.querySelector('.drawer-header button') || drawer).focus?.();
+
+  if (!wasOpen) lockScroll();
 }
 
 export function closeDrawer(drawer) {
+  const wasOpen = drawer.classList.contains('is-open');
   drawer.classList.remove('is-open');
   drawer.previousElementSibling?.classList.remove('is-open');
   drawer.setAttribute('aria-hidden', 'true');
   if (drawer._onKey) document.removeEventListener('keydown', drawer._onKey);
   drawer._restore?.focus?.();
+  if (wasOpen) unlockScroll();
 }
 
 /* =======================================================================

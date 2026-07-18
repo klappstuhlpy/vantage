@@ -271,10 +271,55 @@ const logModal = document.getElementById('log-modal');
 const terminal = document.getElementById('log-terminal');
 let source = null;
 
+// Lines are buffered here and flushed once per animation frame (see appendLine).
+let pending = [];
+let flushQueued = false;
+
+const MAX_LOG_ROWS = 2000; // a busy container emits thousands of lines a minute
+const LOG_SIZE_KEY = 'vantage.docker.log-size';
+
+// ── Line formatting ─────────────────────────────────────────────────────
+// Container output is raw text: it may carry ANSI colour codes, and — because
+// we ask docker for `--timestamps` — every line is prefixed with an RFC3339
+// stamp. Split those off so each line renders as [time] [level] message with
+// the level colour-coded, instead of one undifferentiated grey wall.
+const ANSI_RE = /\x1b\[[0-9;]*m/g;
+const TS_RE = /^(\d{4}-\d{2}-\d{2}T[\d:.]+(?:Z|[+-]\d{2}:\d{2}))\s+([\s\S]*)$/;
+const LEVEL_RE = /\b(TRACE|DEBUG|INFO(?:RMATION)?|NOTICE|WARN(?:ING)?|ERROR|ERR|FATAL|CRIT(?:ICAL)?)\b/i;
+const LEVEL_CANON = {
+  trace: 'TRACE', debug: 'DEBUG', info: 'INFO', information: 'INFO', notice: 'INFO',
+  warn: 'WARN', warning: 'WARN', error: 'ERROR', err: 'ERROR', fatal: 'FATAL', crit: 'FATAL', critical: 'FATAL',
+};
+
+function logRow(raw) {
+  const clean = raw.replace(ANSI_RE, '');
+  let ts = '';
+  let body = clean;
+  const m = clean.match(TS_RE);
+  if (m) {
+    ts = clock(m[1]);
+    body = m[2];
+  }
+  const lm = body.match(LEVEL_RE);
+  const level = lm ? LEVEL_CANON[lm[1].toLowerCase()] : '';
+
+  // The ts and level columns are always present (empty string when unknown) so
+  // messages stay aligned down the whole log regardless of which lines matched.
+  return h(
+    'div',
+    { class: `log-row${level ? ` lvl-${level.toLowerCase()}` : ''}` },
+    h('span', { class: 'log-ts' }, ts),
+    h('span', { class: `log-lvl${level ? ` ${level}` : ''}` }, level),
+    h('span', { class: 'log-msg' }, body)
+  );
+}
+
 function openLogs(name) {
   document.getElementById('log-title').textContent = `${name} · logs`;
   render(terminal);
+  pending = [];
   setLogState('connecting', 'idle');
+  restoreLogSize();
   openModal(logModal, { onClose: stopLogs });
 
   source = new EventSource(`/docker/logs/${encodeURIComponent(name)}`);
@@ -292,19 +337,69 @@ function setLogState(text, kind) {
   el.textContent = text;
 }
 
+// Lines arrive one SSE event at a time and a chatty container can fire dozens
+// per frame. Rendering each on arrival thrashes layout; instead we buffer and
+// flush once per animation frame — one fragment insert, one trim, one scroll.
 function appendLine(line) {
-  const follow = document.getElementById('log-follow').checked;
-  terminal.append(h('div', { class: 'log-row' }, h('span', { class: 'log-msg' }, line)));
+  pending.push(line);
+  if (!flushQueued) {
+    flushQueued = true;
+    requestAnimationFrame(flushLog);
+  }
+}
 
-  // Unbounded output would grow the DOM until the tab dies; a long-running
-  // container can emit thousands of lines a minute.
-  while (terminal.childElementCount > 2000) terminal.firstElementChild.remove();
+function flushLog() {
+  flushQueued = false;
+  if (!pending.length) return;
+
+  const follow = document.getElementById('log-follow').checked;
+  const frag = document.createDocumentFragment();
+  for (const line of pending) frag.append(logRow(line));
+  pending = [];
+  terminal.append(frag);
+
+  // Trim in a single pass rather than per line — the DOM stays bounded.
+  for (let over = terminal.childElementCount - MAX_LOG_ROWS; over > 0; over--) {
+    terminal.firstElementChild.remove();
+  }
   if (follow) terminal.scrollTop = terminal.scrollHeight;
 }
 
 function stopLogs() {
   source?.close();
   source = null;
+  pending = [];
+  flushQueued = false;
+}
+
+// ── Size persistence ────────────────────────────────────────────────────
+// The dialog is `resize: both` (docker.css); remember the last size the admin
+// dragged it to so the log console opens the way they left it.
+function restoreLogSize() {
+  try {
+    const s = JSON.parse(localStorage.getItem(LOG_SIZE_KEY) || 'null');
+    if (s && s.w > 0 && s.h > 0) {
+      logModal.style.width = `${s.w}px`;
+      logModal.style.height = `${s.h}px`;
+    }
+  } catch {
+    /* corrupt/absent storage — fall back to the CSS default size */
+  }
+}
+
+if (logModal) {
+  let saveTimer;
+  new ResizeObserver(() => {
+    if (!logModal.open) return; // ignore the collapse to 0 on close
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      try {
+        localStorage.setItem(LOG_SIZE_KEY, JSON.stringify({ w: logModal.offsetWidth, h: logModal.offsetHeight }));
+      } catch {
+        /* storage full or blocked — sizing just won't persist */
+      }
+    }, 250);
+  }).observe(logModal);
 }
 
 grid?.addEventListener('click', (e) => {

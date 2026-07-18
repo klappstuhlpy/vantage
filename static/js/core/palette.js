@@ -11,7 +11,7 @@
  */
 
 import { get, withQuery } from './api.js';
-import { h, icon, render } from './ui.js';
+import { h, icon, render, lockScroll, unlockScroll } from './ui.js';
 
 /* Keyed by the `kind` field `spotlight.rs` actually emits — `navigate`, `ssh`,
  * `secret`, `firewall`, `container`, `script`. Anything else falls back to a
@@ -82,6 +82,10 @@ function build() {
     e.preventDefault();
     close();
   });
+
+  // Fires on every close path (close(), backdrop, Esc) so the scroll lock that
+  // open() took is always released exactly once.
+  dialog.addEventListener('close', () => unlockScroll());
 }
 
 function onKey(e) {
@@ -219,6 +223,7 @@ export function open(initial = '') {
   active = 0;
   paint();
   dialog.showModal();
+  lockScroll();
   input.focus();
   // An empty query returns the nav targets — the palette is useful before you
   // type anything, which is what makes it a launcher and not just a search box.

@@ -1710,6 +1710,16 @@
     color: var(--ink-1);
   }
 
+  /* Tint the whole row for the levels that matter, so a warning or error is
+     findable while scrolling fast — not just a coloured word mid-line. */
+  .log-row.lvl-warn {
+    background: color-mix(in srgb, var(--warn) 9%, transparent);
+  }
+  .log-row.lvl-error,
+  .log-row.lvl-fatal {
+    background: color-mix(in srgb, var(--down) 10%, transparent);
+  }
+
   .log-empty {
     padding: var(--sp-5);
     text-align: center;
