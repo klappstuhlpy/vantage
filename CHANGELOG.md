@@ -11,7 +11,7 @@ fixes and polish.
 ## [Unreleased]
 
 ### Fixed
-- **Fixed the Cloudflare GraphQL query** by ordering httpRequests1mGroups on the datetimeMinute dimension instead of the invalid datetime field; firewallEventsAdaptive remains unchanged, and runtime API verification is still required.
+- **Cloudflare analytics work again.** The deprecated `httpRequests1mGroups` dataset has been retired — the security page now queries `httpRequestsOverviewAdaptiveGroups` (hourly buckets) and derives threat counts from `firewallEventsAdaptiveGroups`, restoring the traffic chart and threat totals.
 - Added more margin to the flag item in security recent events table for better readability.
 
 ## [0.3.0] - 2026-07-18
