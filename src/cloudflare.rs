@@ -9,8 +9,8 @@
 //! 2. **Firewall (WAF) events** — recent events grouped by action, source,
 //!    country, and rule.
 //!
-//! Traffic hits `httpRequestsOverviewAdaptiveGroups` (with threat counts from
-//! `firewallEventsAdaptiveGroups`); individual events use `firewallEventsAdaptive`.
+//! Traffic hits `httpRequests1hGroups`; individual WAF events use
+//! `firewallEventsAdaptive`.
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -73,26 +73,19 @@ impl Cloudflare {
         query ZoneTraffic($zoneTag: String!, $since: Time!, $until: Time!) {
           viewer {
             zones(filter: { zoneTag: $zoneTag }) {
-              httpRequestsOverviewAdaptiveGroups(
+              httpRequests1hGroups(
                 limit: 10000
                 filter: { datetime_geq: $since, datetime_leq: $until }
-                orderBy: [datetimeHour_ASC]
+                orderBy: [datetime_ASC]
               ) {
-                dimensions { datetimeHour }
+                dimensions { datetime }
                 sum {
                   requests
                   cachedRequests
                   bytes
+                  threats
                   pageViews
                 }
-              }
-              firewallEventsAdaptiveGroups(
-                limit: 10000
-                filter: { datetime_geq: $since, datetime_leq: $until }
-                orderBy: [datetimeHour_ASC]
-              ) {
-                dimensions { datetimeHour }
-                count
               }
             }
           }
@@ -109,34 +102,23 @@ impl Cloudflare {
         });
 
         let resp: GraphQlResponse<TrafficData> = self.post_graphql(body).await?;
-        let zone = resp
+        let buckets = resp
             .data
-            .and_then(|d| d.viewer.zones.into_iter().next());
-
-        let buckets = zone.as_ref().map(|z| &z.http_requests_overview[..]).unwrap_or_default();
-        let fw_buckets = zone.as_ref().map(|z| &z.firewall_groups[..]).unwrap_or_default();
-
-        // Build a map of timestamp -> threat count from firewall groups.
-        let threat_map: std::collections::HashMap<i64, u64> = fw_buckets
-            .iter()
-            .filter_map(|f| {
-                parse_cf_datetime(&f.dimensions.datetime_hour).map(|ts| (ts, f.count))
-            })
-            .collect();
+            .and_then(|d| d.viewer.zones.into_iter().next())
+            .map(|z| z.http_requests_1h_groups)
+            .unwrap_or_default();
 
         let mut summary = ZoneSummary::default();
         for b in buckets {
-            let ts = parse_cf_datetime(&b.dimensions.datetime_hour).unwrap_or(0);
-            let threats = threat_map.get(&ts).copied().unwrap_or(0);
             summary.total_requests += b.sum.requests;
             summary.cached_requests += b.sum.cached_requests;
             summary.bytes += b.sum.bytes;
-            summary.threats += threats;
+            summary.threats += b.sum.threats;
             summary.page_views += b.sum.page_views;
             summary.series.push(TrafficBucket {
-                ts,
+                ts: parse_cf_datetime(&b.dimensions.datetime).unwrap_or(0),
                 requests: b.sum.requests,
-                threats,
+                threats: b.sum.threats,
                 bytes: b.sum.bytes,
                 cached_requests: b.sum.cached_requests,
             });
@@ -248,10 +230,8 @@ struct TrafficViewer {
 
 #[derive(Deserialize)]
 struct TrafficZone {
-    #[serde(rename = "httpRequestsOverviewAdaptiveGroups")]
-    http_requests_overview: Vec<TrafficRow>,
-    #[serde(rename = "firewallEventsAdaptiveGroups", default)]
-    firewall_groups: Vec<FwGroup>,
+    #[serde(rename = "httpRequests1hGroups")]
+    http_requests_1h_groups: Vec<TrafficRow>,
 }
 
 #[derive(Deserialize)]
@@ -262,8 +242,7 @@ struct TrafficRow {
 
 #[derive(Deserialize)]
 struct TrafficDims {
-    #[serde(rename = "datetimeHour")]
-    datetime_hour: String,
+    datetime: String,
 }
 
 #[derive(Deserialize)]
@@ -274,21 +253,10 @@ struct TrafficSum {
     cached_requests: u64,
     #[serde(default)]
     bytes: u64,
+    #[serde(default)]
+    threats: u64,
     #[serde(default, rename = "pageViews")]
     page_views: u64,
-}
-
-#[derive(Deserialize)]
-struct FwGroup {
-    dimensions: FwGroupDims,
-    #[serde(default)]
-    count: u64,
-}
-
-#[derive(Deserialize)]
-struct FwGroupDims {
-    #[serde(rename = "datetimeHour")]
-    datetime_hour: String,
 }
 
 #[derive(Deserialize)]
