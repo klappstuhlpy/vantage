@@ -10,6 +10,9 @@ fixes and polish.
 
 ## [Unreleased]
 
+### Fixed
+- **Fixed the Cloudflare GraphQL query** by ordering httpRequests1mGroups on the datetimeMinute dimension instead of the invalid datetime field; firewallEventsAdaptive remains unchanged, and runtime API verification is still required.
+
 ## [0.3.0] - 2026-07-18
 
 ### Added

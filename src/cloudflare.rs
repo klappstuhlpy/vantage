@@ -76,7 +76,7 @@ impl Cloudflare {
               httpRequests1mGroups(
                 limit: 2000
                 filter: { datetime_geq: $since, datetime_leq: $until }
-                orderBy: [datetime_ASC]
+                orderBy: [datetimeMinute_ASC]
               ) {
                 dimensions { datetimeMinute }
                 sum {
