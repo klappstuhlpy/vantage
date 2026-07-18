@@ -593,6 +593,36 @@ fn bits_match(a: &[u8], b: &[u8], prefix: u8) -> bool {
     (a[full] & mask) == (b[full] & mask)
 }
 
+/// Copies into `raw` (what is on disk) every object key present in `full` (the
+/// config re-serialised after loading) and absent from `raw`, recursing into nested
+/// objects and through arrays position-wise. Returns whether anything was added.
+///
+/// This fills gaps rather than replacing the file wholesale so that a value already
+/// on disk is never restyled and an unrecognised key — the operator's, not ours to
+/// prune — survives the rewrite.
+fn json_fill_missing(full: &serde_json::Value, raw: &mut serde_json::Value) -> bool {
+    match (full, raw) {
+        (serde_json::Value::Object(full), serde_json::Value::Object(raw)) => {
+            let mut added = false;
+            for (key, value) in full {
+                match raw.get_mut(key) {
+                    Some(existing) => added |= json_fill_missing(value, existing),
+                    None => {
+                        raw.insert(key.clone(), value.clone());
+                        added = true;
+                    }
+                }
+            }
+            added
+        }
+        (serde_json::Value::Array(full), serde_json::Value::Array(raw)) if full.len() == raw.len() => full
+            .iter()
+            .zip(raw)
+            .fold(false, |added, (f, r)| added | json_fill_missing(f, r)),
+        _ => false,
+    }
+}
+
 impl Config {
     /// Loads the config, creating a default (with a fresh signing key) on first
     /// run. `VANTAGE_PORT` overrides the primary bind port after loading.
@@ -601,7 +631,24 @@ impl Config {
         let mut config = if path.exists() {
             let raw = std::fs::read_to_string(&path)
                 .with_context(|| format!("could not read config file at {}", path.display()))?;
-            serde_json::from_str(&raw).with_context(|| format!("could not parse config file at {}", path.display()))?
+            let mut raw: serde_json::Value = serde_json::from_str(&raw)
+                .with_context(|| format!("could not parse config file at {}", path.display()))?;
+            let config: Self = serde_json::from_value(raw.clone())
+                .with_context(|| format!("could not parse config file at {}", path.display()))?;
+
+            // A field added since the file was written is filled in by its serde
+            // default and then silently absent from disk, so the operator never sees
+            // that it exists. Write those keys back whenever that happened; anything
+            // already in the file is left exactly as it was.
+            let full = serde_json::to_value(&config).context("could not serialise the config")?;
+            if json_fill_missing(&full, &mut raw) {
+                write_json_to(&raw, &path)?;
+                tracing::info!(
+                    "config at {} was missing fields — wrote them back with defaults",
+                    path.display()
+                );
+            }
+            config
         } else {
             let config = Self::default_with_generated_key()?;
             config.write_to(&path)?;
@@ -677,14 +724,19 @@ impl Config {
     }
 
     fn write_to(&self, path: &Path) -> anyhow::Result<()> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("could not create config directory {}", parent.display()))?;
-        }
-        let json = serde_json::to_string_pretty(self).context("could not serialise the default config")?;
-        std::fs::write(path, json).with_context(|| format!("could not write config to {}", path.display()))?;
-        Ok(())
+        let json = serde_json::to_value(self).context("could not serialise the default config")?;
+        write_json_to(&json, path)
     }
+}
+
+fn write_json_to(json: &serde_json::Value, path: &Path) -> anyhow::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("could not create config directory {}", parent.display()))?;
+    }
+    let json = serde_json::to_string_pretty(json).context("could not serialise the config")?;
+    std::fs::write(path, json).with_context(|| format!("could not write config to {}", path.display()))?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -734,6 +786,64 @@ fn config_path() -> anyhow::Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn fill(full: serde_json::Value, mut raw: serde_json::Value) -> (bool, serde_json::Value) {
+        let added = json_fill_missing(&full, &mut raw);
+        (added, raw)
+    }
+
+    #[test]
+    fn a_missing_field_is_written_back_with_its_default() {
+        use serde_json::json;
+
+        // Top level, nested, and inside an array element.
+        assert_eq!(
+            fill(json!({"sqlite_sources": []}), json!({})),
+            (true, json!({"sqlite_sources": []}))
+        );
+        assert_eq!(
+            fill(json!({"alerts": {"ntfy_url": null}}), json!({"alerts": {}})),
+            (true, json!({"alerts": {"ntfy_url": null}}))
+        );
+        assert_eq!(
+            fill(
+                json!({"s": [{"name": "a", "path": "b"}]}),
+                json!({"s": [{"name": "a"}]})
+            ),
+            (true, json!({"s": [{"name": "a", "path": "b"}]}))
+        );
+    }
+
+    #[test]
+    fn an_existing_config_is_left_alone() {
+        use serde_json::json;
+
+        // Nothing missing — an untouched file must not be rewritten.
+        assert_eq!(
+            fill(json!({"port": 8092}), json!({"port": 8092})),
+            (false, json!({"port": 8092}))
+        );
+        // A value that differs from the default is a value, not a gap: keep it.
+        assert_eq!(
+            fill(json!({"port": 8092}), json!({"port": 9000})),
+            (false, json!({"port": 9000}))
+        );
+        // An unrecognised key on disk is the operator's — never pruned.
+        let operator = json!({"port": 8092, "mystery": true});
+        assert_eq!(fill(json!({"port": 8092}), operator.clone()), (false, operator));
+    }
+
+    #[test]
+    fn config_round_trips_without_wanting_a_rewrite() {
+        // The invariant that matters: a config we just wrote must load clean.
+        let full = serde_json::to_value(Config::test_default()).unwrap();
+        assert_eq!(fill(full.clone(), full.clone()), (false, full.clone()));
+
+        // ...and stripping a field must be detected and restored.
+        let mut stripped = full.clone();
+        stripped.as_object_mut().unwrap().remove("sqlite_sources").unwrap();
+        assert_eq!(fill(full.clone(), stripped), (true, full));
+    }
 
     fn exposure(mode: ExposureMode, bind: &str) -> Exposure {
         Exposure {

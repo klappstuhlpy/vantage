@@ -10,6 +10,10 @@ fixes and polish.
 
 ## [Unreleased]
 
+### Changed
+
+- **`config.json` now fills in settings it is missing when Vantage starts.** Upgrading used to leave your config file exactly as it was, so options added since you wrote it — `sqlite_sources` and `postgres_url` among them — worked but never appeared in the file, and the only way to find out one existed was to read the release notes. New keys are now written in with their defaults, so opening the file shows you everything there is to configure. Values you have already set are left untouched, as is anything Vantage doesn't recognise.
+
 ### Fixed
 - **Cloudflare analytics work again.** The deprecated `httpRequests1mGroups` dataset has been retired — the security page now queries `httpRequests1hGroups` (hourly buckets, same fields including threats), restoring the traffic chart and threat totals.
 - Added more margin to the flag item in security recent events table for better readability.
