@@ -321,9 +321,11 @@ pub fn spawn_scheduler(state: AppState) {
                 h => h * 3600,
             };
             let now = OffsetDateTime::now_utc().unix_timestamp();
+            // No backups yet means due — the first one should not wait an
+            // interval for a predecessor that does not exist.
             let due = list(&state)
                 .first()
-                .map_or(true, |b| now >= b.modified_unix + interval_secs as i64);
+                .is_none_or(|b| now >= b.modified_unix + interval_secs as i64);
             if !due {
                 continue;
             }

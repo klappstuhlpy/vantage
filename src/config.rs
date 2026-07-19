@@ -250,6 +250,15 @@ pub struct Config {
     /// grant — see `audit::prune`.
     #[serde(default)]
     pub audit_retention_days: Option<u32>,
+    /// Send the Content-Security-Policy as `-Report-Only` instead of enforcing
+    /// it. Off by default: the policy is enforced.
+    ///
+    /// This exists for the first run against a real browser on a real host. A
+    /// policy that blocks one forgotten asset can render the control plane
+    /// unusable, and this control plane may be the only way in to the box —
+    /// discovering that in the console beats discovering it as a blank page.
+    #[serde(default)]
+    pub csp_report_only: bool,
     /// Multi-sink alert delivery (Discord webhook, ntfy, generic webhook, email).
     /// All sinks are optional; absent = no alerts.
     #[serde(default)]
@@ -707,6 +716,7 @@ impl Config {
             production: false,
             update_check_interval_hours: None,
             audit_retention_days: None,
+            csp_report_only: false,
             alerts: AlertsConfig::default(),
             backup: BackupConfig::default(),
             proxy: ProxyConfig::default(),
@@ -754,6 +764,7 @@ impl Config {
             production: false,
             update_check_interval_hours: None,
             audit_retention_days: None,
+            csp_report_only: false,
             alerts: AlertsConfig::default(),
             backup: BackupConfig::default(),
             proxy: ProxyConfig::default(),

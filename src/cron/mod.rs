@@ -490,17 +490,18 @@ pub fn spawn_scheduler(state: AppState) {
             let now = OffsetDateTime::now_utc();
             for script in &state.config.spotlight_scripts {
                 let Some(expr) = &script.schedule else { continue };
-                match CronSchedule::parse(expr) {
-                    Ok(sched) if sched.matches(now) => {
-                        if run_script(&state, script, "schedule", None).await.is_none() {
-                            // The previous run of this script is still going. A
-                            // schedule tighter than the script is long is an
-                            // operator error, but the fix is to say so, not to
-                            // pile a second copy on top of the first.
-                            tracing::warn!(script = %script.name, "skipped — the previous run is still going");
-                        }
-                    }
-                    _ => {}
+                // An unparseable expression was already reported at startup (the
+                // loop above); here it just means "never due".
+                let Ok(sched) = CronSchedule::parse(expr) else { continue };
+                if !sched.matches(now) {
+                    continue;
+                }
+                if run_script(&state, script, "schedule", None).await.is_none() {
+                    // The previous run of this script is still going. A schedule
+                    // tighter than the script is long is an operator error, but
+                    // the fix is to say so, not to pile a second copy on top of
+                    // the first.
+                    tracing::warn!(script = %script.name, "skipped — the previous run is still going");
                 }
             }
         }

@@ -8,7 +8,6 @@ use base64::{prelude::BASE64_STANDARD_NO_PAD, prelude::BASE64_URL_SAFE_NO_PAD, E
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
-use tracing;
 
 use crate::AppState;
 
@@ -482,7 +481,7 @@ pub fn sync_authorized_keys(state: &AppState) {
                     .unwrap_or_else(|e| {
                         Err(PrepareError::Io {
                             path: std::path::PathBuf::new(),
-                            error: std::io::Error::new(std::io::ErrorKind::Other, e.to_string()),
+                            error: std::io::Error::other(e.to_string()),
                         })
                     });
 

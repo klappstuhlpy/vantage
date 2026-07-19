@@ -261,6 +261,14 @@
     contain: content;
   }
 
+  /* The event feed is a sidebar-height strip, not a full log pane. This was an
+     inline `style=` attribute until the CSP landed — `style-src 'self'` forbids
+     those, and one attribute is not worth an `'unsafe-inline'` that would
+     unlock every inline style in the app. */
+  .events-log {
+    max-height: 260px;
+  }
+
   @media (max-width: 720px) {
     .modal.log-modal {
       min-width: 0;
