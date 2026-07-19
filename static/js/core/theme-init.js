@@ -37,9 +37,9 @@
 
   function apply(state) {
     root.setAttribute('data-theme', resolveTheme(state.theme));
-    // Radar is the built-in default and carries no attribute, so the token
+    // Halo is the built-in default and carries no attribute, so the token
     // file's :root block stays the single source of the default accent.
-    if (state.accent && state.accent !== 'radar') root.setAttribute('data-accent', state.accent);
+    if (state.accent && state.accent !== 'halo') root.setAttribute('data-accent', state.accent);
     else root.removeAttribute('data-accent');
     if (state.density === 'compact') root.setAttribute('data-density', 'compact');
     else root.removeAttribute('data-density');
@@ -49,7 +49,7 @@
 
   var state = {
     theme: read(KEYS.theme, 'system'),
-    accent: read(KEYS.accent, 'radar'),
+    accent: read(KEYS.accent, 'halo'),
     density: read(KEYS.density, 'comfortable'),
     sidebar: read(KEYS.sidebar, 'full'),
   };

@@ -1,5 +1,6 @@
 /.idea
 /.claude
+/docs
 /target
 /logs
 .env

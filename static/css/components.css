@@ -427,6 +427,15 @@
     }
   }
 
+  /* Selection carries a left edge, not just a tint. With an achromatic accent
+     --acc-soft and --bg-hover are both neutral gray and differ only in alpha,
+     so a hovered row and a selected one were nearly indistinguishable; the edge
+     is what actually reads. (On collapsed borders a box-shadow on <tr> is
+     unreliable, so it goes on the first cell.) */
+  .table tbody tr.is-selected td:first-child {
+    box-shadow: inset 2px 0 0 var(--acc);
+  }
+
   .table tbody tr.is-selected {
     background: var(--acc-soft);
   }
@@ -923,9 +932,13 @@
     background: var(--bg-hover);
   }
 
+  /* An outline, because the tint alone no longer separates selected from
+     hovered once the accent is achromatic — and --acc as text is a hair off
+     --ink-1, so color carries nothing here either. */
   .segmented button[aria-selected='true'] {
     background: var(--acc-soft);
     color: var(--acc);
+    box-shadow: inset 0 0 0 1px var(--acc-line);
   }
 
   .segmented .count-badge {
@@ -1967,8 +1980,12 @@
     color: var(--ink-1);
   }
 
+  /* Same reason as the table row: the active item needs an edge, since keyboard
+     navigation through the palette is the one place selection has to be
+     unmistakable at a glance. */
   .palette-item[aria-selected='true'] {
     background: var(--acc-soft);
+    box-shadow: inset 2px 0 0 var(--acc);
   }
 
   .palette-item[aria-selected='true'] .palette-item-title {

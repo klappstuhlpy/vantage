@@ -56,6 +56,7 @@ is not an asset.
 | `scripts/check_imports.py` | Walks the ES-module graph: every relative import resolves, every named import exists, no import is unused. A bad named import is a runtime SyntaxError on one page only. |
 | `scripts/check_contrast.py` | WCAG audit of the real `tokens.css` — every text pair at 4.5:1, control borders at 3:1, in both themes and all five accents. |
 | `scripts/build_sprite.py` | Regenerates `icons/sprite.svg`. |
+| `scripts/build_logo.py` | Regenerates `icons/logo-mask.png` from `icons/logo.png`. Needs Pillow. |
 
 All four exit non-zero on failure and are CI-ready. The first three are the
 frontend's test suite — `cargo test` cannot see any of what they check.

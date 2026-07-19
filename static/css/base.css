@@ -171,9 +171,13 @@
     overflow-x: auto;
   }
 
+  /* The default accent is achromatic, so hue no longer separates a link from
+     body text: the underline is the whole affordance and has to be solid, not
+     the 40%-opacity hint it was when links were cyan. */
   a {
     color: var(--acc);
-    text-decoration-color: color-mix(in srgb, var(--acc) 40%, transparent);
+    text-decoration-line: underline;
+    text-decoration-color: currentColor;
     text-underline-offset: 2px;
     transition: color var(--dur-fast) var(--ease-out);
   }

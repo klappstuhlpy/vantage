@@ -10,11 +10,16 @@ fixes and polish.
 
 ## [Unreleased]
 
+## [0.4.2]
+
 ### Changed
 
 - **The Content-Security-Policy now allows inline styles.** `style-src` is `'self' 'unsafe-inline'`; `script-src` stays strict. The two vendored libraries that ship their CSS *inside* their JavaScript — CodeMirror 6 and Cytoscape — build a `<style>` element at runtime, which the old policy blocked. Their sheets are generated per instance, so there is no stable hash to pin and a nonce cannot reach a `<style>` a library creates itself. Vantage's own markup still carries no `<style>` block and no `style=` attribute.
 
 - **Static assets are cached and compressed.** `/static` previously carried no `Cache-Control` at all and was served uncompressed, so every hard refresh re-downloaded the full 1.5 MB asset tree — the two vendored bundles, CodeMirror (430 KB) and Cytoscape (372 KB), dominating it. Assets now revalidate against a short public cache window with a long stale-while-revalidate, and responses are gzip/brotli compressed. Asset URLs carry no content hash, so the window is deliberately short rather than `immutable`: an upgrade is picked up on the next revalidation, not pinned until you clear your browser cache. Admin data endpoints remain `private` and short-lived, unchanged.
+
+- **Migrating from old cyan theme to the new dark theme.** The old cyan theme was a bit too bright, so the new dark theme is now the default. If you had previously set the cyan theme, your accent preference is still adjustable.
+- **New logo** The new logo thats now used is officially added and will be used in the future.
 
 ### Fixed
 
@@ -180,7 +185,8 @@ fixes and polish.
 - Repeated failed logins from the same address are throttled independently of any firewall configuration, and login timing does not reveal whether a username exists.
 - Changes to the host are made through a typed, audited boundary rather than by shelling out.
 
-[Unreleased]: https://github.com/klappstuhlpy/vantage/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/klappstuhlpy/vantage/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/klappstuhlpy/vantage/compare/v0.4.1...0.4.2
 [0.4.1]: https://github.com/klappstuhlpy/vantage/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/klappstuhlpy/vantage/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/klappstuhlpy/vantage/compare/v0.2.0...v0.3.0

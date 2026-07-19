@@ -17,7 +17,7 @@ const boot = window.__vantage_theme;
 // If theme-init.js somehow didn't run (asset 404, script blocked), degrade to a
 // no-op store rather than throwing on every page.
 const KEYS = boot?.KEYS ?? { theme: 'vantage.theme', accent: 'vantage.accent', density: 'vantage.density', sidebar: 'vantage.sidebar' };
-const state = boot?.state ?? { theme: 'system', accent: 'radar', density: 'comfortable', sidebar: 'full' };
+const state = boot?.state ?? { theme: 'system', accent: 'halo', density: 'comfortable', sidebar: 'full' };
 
 const listeners = new Set();
 
@@ -63,7 +63,7 @@ export function setTheme(pref) {
   syncToServer();
 }
 
-/** @param {'radar'|'phosphor'|'amber'|'ion'|'ember'} name */
+/** @param {'halo'|'phosphor'|'amber'|'ion'|'ember'} name */
 export function setAccent(name) {
   state.accent = name;
   write(KEYS.accent, name);
@@ -119,7 +119,9 @@ if (window.matchMedia) {
 }
 
 export const ACCENTS = [
-  { id: 'radar', label: 'Radar', hex: '#2AC3DE' },
+  // The default accent is the bare :root block — it has no [data-accent] rule,
+  // so a stored preference from before the rename falls through to it.
+  { id: 'halo', label: 'Halo', hex: '#F2F2F2' },
   { id: 'phosphor', label: 'Phosphor', hex: '#3ECF8E' },
   { id: 'amber', label: 'Amber', hex: '#FDB022' },
   { id: 'ion', label: 'Ion', hex: '#A78BFA' },

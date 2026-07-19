@@ -36,43 +36,22 @@
     box-shadow: var(--shadow-2);
   }
 
+  /* The full brand lockup, painted rather than drawn: the artwork is an alpha
+     mask and the colour comes from --ink-1, so one file reads correctly on both
+     themes instead of two exports that drift apart. It is deliberately NOT the
+     scope mark used in the app shell: that one animates to signal a live socket,
+     and there is no socket on this page. */
   .auth-brand {
-    display: flex;
-    align-items: center;
-    gap: var(--sp-2);
-    color: var(--acc);
-  }
-
-  .auth-brand .scope {
-    width: 22px;
-    height: 22px;
-  }
-
-  /* The brand mark here is static. On the app shell it sweeps to signal a live
-     socket — there is no socket on this page, and an animation that means
-     "connected" everywhere else must not appear where it means nothing. */
-  .auth-brand .scope-ring {
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.5;
-    opacity: 0.9;
-  }
-
-  .auth-brand .scope-grid {
-    stroke: currentColor;
-    stroke-width: 1;
-    opacity: 0.35;
-  }
-
-  .auth-brand .scope-dot {
-    fill: currentColor;
-  }
-
-  .auth-brand-name {
-    font-size: var(--fs-md);
-    font-weight: 600;
-    letter-spacing: -0.01em;
-    color: var(--ink-1);
+    margin-bottom: 1rem;
+    align-self: center;
+    width: 100px;
+    /* Matches logo-mask.png's intrinsic size; `build_logo.py` prints this line
+       when it regenerates the mask, since a mask has no intrinsic ratio to
+       inherit and a stale value letterboxes the artwork. */
+    aspect-ratio: 512 / 436;
+    background: var(--ink-1);
+    -webkit-mask: url('/static/icons/logo-mask.png') no-repeat center / contain;
+    mask: url('/static/icons/logo-mask.png') no-repeat center / contain;
   }
 
   .auth-title {
@@ -142,12 +121,6 @@
 
   .auth-alt .auth-form {
     margin-top: var(--sp-4);
-  }
-
-  .auth-foot {
-    margin: 0;
-    font-size: var(--fs-xs);
-    color: var(--ink-3);
   }
 
   @media (max-width: 480px) {

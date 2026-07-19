@@ -1,5 +1,5 @@
 /* ==========================================================================
-   Vantage design tokens — "Overwatch"
+   Vantage design tokens — "Halo"
    --------------------------------------------------------------------------
    The single source of truth for every color, size, and duration in the UI.
    Nothing below this file hard-codes a hex value; if you find yourself typing
@@ -14,21 +14,22 @@
 
 @layer tokens {
   /* ---------------------------------------------------------------------
-     Dark theme (default). Deep blue-slate, never pure black: pure black on
-     an LCD produces halation around light text, and the blue cast keeps the
-     status hues (which are warm) legible against it.
+     Dark theme (default). Neutral black, never pure black: #000 on an LCD
+     produces halation around light text, and a hair of lift also gives the
+     surface ramp somewhere to go. The ramp is chromatically neutral so the
+     status hues are the only color on the page.
      --------------------------------------------------------------------- */
   :root,
   :root[data-theme='dark'] {
     color-scheme: dark;
 
     /* Surfaces, in elevation order. Each step is a real surface, not a shadow. */
-    --bg-0: #0b0f14; /* page background          */
-    --bg-1: #11161d; /* card / panel             */
-    --bg-2: #161e28; /* raised: input, menu, thead */
-    --bg-3: #1c2634; /* overlay: modal, palette  */
-    --bg-hover: rgba(255, 255, 255, 0.04);
-    --bg-active: rgba(255, 255, 255, 0.07);
+    --bg-0: #0a0a0a; /* page background          */
+    --bg-1: #131313; /* card / panel             */
+    --bg-2: #1a1a1a; /* raised: input, menu, thead */
+    --bg-3: #212121; /* overlay: modal, palette  */
+    --bg-hover: rgba(255, 255, 255, 0.045);
+    --bg-active: rgba(255, 255, 255, 0.08);
 
     /* Lines come in three weights on purpose. WCAG 1.4.11 wants 3:1 for the
        boundary that *identifies a control* — but not for decorative rules, and
@@ -37,24 +38,30 @@
          --line-2    structural dividers and overlay edges — exempt
          --line-ctl  input/switch/checkbox/outline-button borders — >= 3:1
        Use --line-ctl for anything the user is meant to click or type into. */
-    --line-1: #1f2937;
-    --line-2: #2e3d4f;
-    --line-ctl: #567395;
+    --line-1: #262626;
+    --line-2: #333333;
+    --line-ctl: #6b6b6b;
 
     /* Ink. A three-step ramp at roughly 16 / 7.5 / 4.6 against a card: every
        step is real text somewhere (--ink-3 renders chart axes, timestamps,
        hints and placeholders), so all three clear AA 4.5. Disabled controls
        dim with opacity instead, which WCAG exempts. */
-    --ink-1: #e9eff5; /* primary text                 */
-    --ink-2: #94a3b4; /* secondary / labels           */
-    --ink-3: #7f8fa1; /* tertiary: hints, axes, faint */
-    --ink-on-acc: #04141a; /* text on an accent-filled surface */
+    --ink-1: #ededed; /* primary text                 */
+    --ink-2: #a1a1a1; /* secondary / labels           */
+    --ink-3: #8a8a8a; /* tertiary: hints, axes, faint */
+    --ink-on-acc: #0a0a0a; /* text on an accent-filled surface */
 
-    /* Brand accent — overridden by the accent presets below. */
-    --acc: #2ac3de;
-    --acc-hi: #6bd9ec;
-    --acc-soft: rgba(42, 195, 222, 0.13);
-    --acc-line: rgba(42, 195, 222, 0.4);
+    /* Brand accent — achromatic by design ("Halo"). Vantage reserves five hues
+       for status (--down 4°, --warn 39°, --ok 154°, --info 214°, --idle 258°),
+       and status must never depend on a cosmetic choice. Rather than spend the
+       one remaining hue slot on decoration, the default accent is near-white:
+       it cannot collide with a status color, and on a neutral-black page it
+       reads sharper than any hue would. The presets below are the opt-in for
+       users who want a chromatic accent. */
+    --acc: #f2f2f2;
+    --acc-hi: #ffffff;
+    --acc-soft: rgba(255, 255, 255, 0.09);
+    --acc-line: rgba(255, 255, 255, 0.22);
 
     /* Semantic status. Fixed across every accent preset: status must never
        depend on a cosmetic choice. */
@@ -85,31 +92,30 @@
     --ch-4: #28ad57;
     --ch-grid: var(--line-1);
 
-    /* Elevation — softened and layered so a floating surface reads as lifted,
-       not stamped. Each level pairs a wide ambient shadow with a tight contact
-       one; that two-part falloff is what makes glass feel like it hovers. */
-    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.28), 0 1px 1px rgba(0, 0, 0, 0.16);
-    --shadow-2: 0 6px 20px -4px rgba(0, 0, 0, 0.4), 0 2px 6px -2px rgba(0, 0, 0, 0.3);
-    --shadow-3: 0 24px 60px -12px rgba(0, 0, 0, 0.55), 0 8px 24px -8px rgba(0, 0, 0, 0.42);
-    --scrim: rgba(6, 9, 12, 0.66);
+    /* Elevation — a flat surface ramp does the work, so shadow is reduced to
+       what separation actually needs: a hairline on a resting card, a real but
+       tight lift on a modal. Nothing hovers. */
+    --shadow-1: 0 1px 0 rgba(0, 0, 0, 0.5);
+    --shadow-2: 0 4px 12px -4px rgba(0, 0, 0, 0.5);
+    --shadow-3: 0 16px 40px -12px rgba(0, 0, 0, 0.7);
+    --scrim: rgba(0, 0, 0, 0.7);
 
-    /* Glass — the material for anything that floats above the page (topbar,
-       menus, modals, palette, drawer). A translucent tint plus a real blur, so
-       the content behind refracts through rather than being hidden by an opaque
-       slab. The 1px inner highlight is the lit top edge that sells the depth.
-       Used only on overlays: a card sits on the flat --bg-0 with nothing behind
-       it, so blurring there buys muddiness and no refraction. */
-    --glass-bg: color-mix(in srgb, var(--bg-3) 78%, transparent);
-    --glass-bg-strong: color-mix(in srgb, var(--bg-3) 88%, transparent);
-    --glass-border: color-mix(in srgb, var(--line-2) 85%, transparent);
-    --glass-blur: 18px;
-    --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    /* Glass — retained as tokens because ~59 declarations across six files
+       resolve through them, but the material is now opaque. Blur is 0 and the
+       lit top edge is gone: an overlay reads as a distinct surface via its own
+       background and border, the same way every other surface does. */
+    --glass-bg: var(--bg-3);
+    --glass-bg-strong: var(--bg-3);
+    --glass-border: var(--line-2);
+    --glass-blur: 0px;
+    --glass-highlight: none;
 
-    /* Status glow — the one deliberate flourish (§3). Used sparingly, only on
-       cards reporting a real problem. */
-    --glow-down: inset 0 0 24px -6px rgba(249, 112, 102, 0.35);
-    --glow-warn: inset 0 0 24px -6px rgba(253, 176, 34, 0.28);
-    --glow-acc: 0 0 18px -4px var(--acc-line);
+    /* Status glow — retired. A card reporting a problem says so with its border
+       and its text color; an inner glow was decoration on top of a signal that
+       already carried. Kept as no-op tokens so consumers need no edit. */
+    --glow-down: none;
+    --glow-warn: none;
+    --glow-acc: none;
   }
 
   /* ---------------------------------------------------------------------
@@ -119,26 +125,27 @@
   :root[data-theme='light'] {
     color-scheme: light;
 
-    --bg-0: #f4f6f9;
+    --bg-0: #fafafa;
     --bg-1: #ffffff;
-    --bg-2: #f8fafc;
+    --bg-2: #f5f5f5;
     --bg-3: #ffffff;
-    --bg-hover: rgba(15, 30, 50, 0.04);
-    --bg-active: rgba(15, 30, 50, 0.07);
+    --bg-hover: rgba(0, 0, 0, 0.04);
+    --bg-active: rgba(0, 0, 0, 0.07);
 
-    --line-1: #e3e9f0;
-    --line-2: #cbd5e1;
-    --line-ctl: #728dae;
+    --line-1: #e5e5e5;
+    --line-2: #d4d4d4;
+    --line-ctl: #767676;
 
-    --ink-1: #17212d;
-    --ink-2: #485564;
-    --ink-3: #607184;
+    --ink-1: #171717;
+    --ink-2: #525252;
+    --ink-3: #666666;
     --ink-on-acc: #ffffff;
 
-    --acc: #0e7f96;
-    --acc-hi: #0a6376;
-    --acc-soft: rgba(14, 127, 150, 0.1);
-    --acc-line: rgba(14, 127, 150, 0.35);
+    /* Halo, mirrored: near-black on light. Same reasoning as the dark block. */
+    --acc: #171717;
+    --acc-hi: #000000;
+    --acc-soft: rgba(0, 0, 0, 0.06);
+    --acc-line: rgba(0, 0, 0, 0.2);
 
     --ok: #167a52;
     --ok-soft: rgba(22, 122, 82, 0.1);
@@ -158,22 +165,21 @@
     --ch-4: #209148;
     --ch-grid: var(--line-1);
 
-    --shadow-1: 0 1px 2px rgba(15, 30, 50, 0.06), 0 1px 1px rgba(15, 30, 50, 0.04);
-    --shadow-2: 0 6px 20px -4px rgba(15, 30, 50, 0.12), 0 2px 6px -2px rgba(15, 30, 50, 0.08);
-    --shadow-3: 0 24px 60px -12px rgba(15, 30, 50, 0.2), 0 8px 24px -8px rgba(15, 30, 50, 0.12);
-    --scrim: rgba(23, 33, 45, 0.4);
+    --shadow-1: 0 1px 0 rgba(0, 0, 0, 0.06);
+    --shadow-2: 0 4px 12px -4px rgba(0, 0, 0, 0.12);
+    --shadow-3: 0 16px 40px -12px rgba(0, 0, 0, 0.18);
+    --scrim: rgba(0, 0, 0, 0.4);
 
-    /* Light-theme glass: a near-white tint over a bright page, and the highlight
-       flips to a strong white top edge that reads as a lit bevel on light. */
-    --glass-bg: color-mix(in srgb, var(--bg-3) 72%, transparent);
-    --glass-bg-strong: color-mix(in srgb, var(--bg-3) 85%, transparent);
-    --glass-border: color-mix(in srgb, var(--line-2) 70%, transparent);
-    --glass-blur: 18px;
-    --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+    /* Opaque, as in the dark block. */
+    --glass-bg: var(--bg-3);
+    --glass-bg-strong: var(--bg-3);
+    --glass-border: var(--line-2);
+    --glass-blur: 0px;
+    --glass-highlight: none;
 
-    --glow-down: inset 0 0 24px -6px rgba(192, 54, 44, 0.18);
-    --glow-warn: inset 0 0 24px -6px rgba(154, 97, 0, 0.16);
-    --glow-acc: 0 0 18px -6px var(--acc-line);
+    --glow-down: none;
+    --glow-warn: none;
+    --glow-acc: none;
   }
 
   /* ---------------------------------------------------------------------
@@ -263,13 +269,13 @@
     --sp-6: 32px;
     --sp-7: 48px;
 
-    /* Shape — rounder than a typical control plane on purpose. The softer
-       corners are the through-line of the fluent look; the scale still steps
-       cleanly (control → panel → hero) so nesting a field in a card in a modal
-       keeps concentric, not clashing, radii. */
-    --r-s: 9px;
-    --r-m: 14px;
-    --r-l: 20px;
+    /* Shape — tight on purpose. The corners read engineered rather than
+       friendly, which is the register a control plane wants; the scale still
+       steps cleanly (control → panel → hero) so nesting a field in a card in a
+       modal keeps concentric, not clashing, radii. */
+    --r-s: 6px;
+    --r-m: 10px;
+    --r-l: 14px;
     --r-full: 999px;
 
     /* Motion. Hover/press is quick; enter/exit gets a decelerating curve so
