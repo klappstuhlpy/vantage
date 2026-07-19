@@ -161,7 +161,9 @@ fixes and polish.
 - Repeated failed logins from the same address are throttled independently of any firewall configuration, and login timing does not reveal whether a username exists.
 - Changes to the host are made through a typed, audited boundary rather than by shelling out.
 
-[Unreleased]: https://github.com/klappstuhlpy/vantage/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/klappstuhlpy/vantage/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/klappstuhlpy/vantage/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/klappstuhlpy/vantage/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/klappstuhlpy/vantage/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/klappstuhlpy/vantage/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/klappstuhlpy/vantage/releases/tag/v0.1.0
