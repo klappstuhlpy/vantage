@@ -5,6 +5,15 @@
  * is a backend wart we are not fixing in a frontend rewrite, so this module
  * absorbs it: callers always get an ApiError with a message worth showing a
  * human, whichever shape came back.
+ *
+ * ## Stale-while-revalidate (SWR)
+ *
+ * GET requests can opt into a local cache: `get(url, { swr: true })` returns
+ * the last successful response from sessionStorage immediately, then fetches
+ * fresh data in the background and calls `opts.onRefresh(data)` when it
+ * arrives. The page renders instantly with cached content and transparently
+ * updates when the server answers — eliminating the empty skeleton on repeat
+ * visits to metrics, docker, and the home dashboard.
  */
 
 export class ApiError extends Error {
@@ -65,6 +74,54 @@ function messageFrom(body, status) {
     return body.length > 300 ? `${body.slice(0, 300)}…` : body;
   }
   return STATUS_TEXT[status] || `Request failed (${status}).`;
+}
+
+/* =======================================================================
+   SWR cache — sessionStorage-backed, bounded, per-URL
+   ======================================================================= */
+
+const SWR_PREFIX = 'swr:';
+const SWR_MAX_AGE_MS = 5 * 60 * 1000;
+const SWR_MAX_ENTRIES = 40;
+
+function swrKey(url) { return SWR_PREFIX + url; }
+
+function swrRead(url) {
+  try {
+    const raw = sessionStorage.getItem(swrKey(url));
+    if (!raw) return null;
+    const entry = JSON.parse(raw);
+    if (Date.now() - entry.ts > SWR_MAX_AGE_MS) {
+      sessionStorage.removeItem(swrKey(url));
+      return null;
+    }
+    return entry.data;
+  } catch { return null; }
+}
+
+function swrWrite(url, data) {
+  try {
+    const key = swrKey(url);
+    sessionStorage.setItem(key, JSON.stringify({ ts: Date.now(), data }));
+    swrEvict();
+  } catch { /* quota exceeded — degrade silently */ }
+}
+
+function swrEvict() {
+  try {
+    const keys = [];
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const k = sessionStorage.key(i);
+      if (k?.startsWith(SWR_PREFIX)) {
+        const raw = sessionStorage.getItem(k);
+        try { keys.push({ k, ts: JSON.parse(raw).ts || 0 }); } catch { keys.push({ k, ts: 0 }); }
+      }
+    }
+    if (keys.length <= SWR_MAX_ENTRIES) return;
+    keys.sort((a, b) => a.ts - b.ts);
+    const toRemove = keys.length - SWR_MAX_ENTRIES;
+    for (let i = 0; i < toRemove; i++) sessionStorage.removeItem(keys[i].k);
+  } catch {}
 }
 
 /**
@@ -135,7 +192,37 @@ export async function request(url, opts = {}) {
   return body;
 }
 
-export const get = (url, opts) => request(url, { ...opts, method: 'GET' });
+/**
+ * GET with optional stale-while-revalidate.
+ *
+ * With `{ swr: true }`, returns cached data instantly (or fetches normally if
+ * no cache). On success the cache is updated; if an `onRefresh` callback was
+ * given, it fires with the fresh data so the page can repaint.
+ *
+ * @param {string} url
+ * @param {{ swr?: boolean, onRefresh?: (data: any) => void } & RequestInit} [opts]
+ */
+export function get(url, opts = {}) {
+  const { swr, onRefresh, ...rest } = opts;
+
+  if (swr) {
+    const cached = swrRead(url);
+    if (cached !== null) {
+      // Fire revalidation in the background, update cache + callback.
+      request(url, { ...rest, method: 'GET' }).then((fresh) => {
+        swrWrite(url, fresh);
+        if (onRefresh) onRefresh(fresh);
+      }).catch(() => {});
+      return Promise.resolve(cached);
+    }
+  }
+
+  // No cache or SWR not requested — normal fetch, but write to cache on success.
+  return request(url, { ...rest, method: 'GET' }).then((data) => {
+    if (swr) swrWrite(url, data);
+    return data;
+  });
+}
 export const post = (url, json, opts) => request(url, { ...opts, method: 'POST', json });
 export const patch = (url, json, opts) => request(url, { ...opts, method: 'PATCH', json });
 export const put = (url, json, opts) => request(url, { ...opts, method: 'PUT', json });

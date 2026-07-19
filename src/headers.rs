@@ -94,6 +94,47 @@ pub async fn security_headers(report_only: bool, request: Request, next: Next) -
     response
 }
 
+/// Paths whose JSON responses tolerate a short browser-cache lifetime.
+/// The browser serves from cache for `max-age` seconds (eliminating the round
+/// trip entirely on rapid tab-switches and back-button navigations), then
+/// revalidates in the background for `stale-while-revalidate` more seconds.
+///
+/// `private` ensures shared proxies never cache admin data.
+const SWR_PATHS: &[&str] = &[
+    "/metrics/current",
+    "/metrics/history",
+    "/docker/services/data",
+    "/docker/graph",
+    "/docker/actions/log",
+    "/monitors/data",
+    "/firewall/data",
+    "/secrets/data",
+    "/security/data",
+    "/security/cloudflare",
+    "/api/updates",
+];
+
+const SWR_HEADER: &str = "private, max-age=5, stale-while-revalidate=30";
+
+/// Sets `Cache-Control: private, max-age=5, stale-while-revalidate=30` on
+/// successful GET responses to data endpoints that the frontend polls. Applied
+/// after the inner handler so it only touches 2xx JSON — error and redirect
+/// responses stay uncached.
+pub async fn cache_control(request: Request, next: Next) -> Response {
+    let is_get = request.method() == axum::http::Method::GET;
+    let path_match = is_get && SWR_PATHS.iter().any(|p| request.uri().path().starts_with(p));
+
+    let mut response = next.run(request).await;
+
+    if path_match && response.status().is_success() {
+        response
+            .headers_mut()
+            .insert("cache-control", HeaderValue::from_static(SWR_HEADER));
+    }
+
+    response
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -100,7 +100,7 @@ function setBar(card, key, pct, label) {
 async function refreshServices() {
   if (!grid) return;
   try {
-    const services = await get('/docker/services/data');
+    const services = await get('/docker/services/data', { swr: true });
     for (const s of services) {
       const card = cardFor(s.name);
       if (card) applyService(card, s);
@@ -223,7 +223,7 @@ async function loadActionLog() {
   const body = document.getElementById('action-log-body');
   if (!body) return;
   try {
-    const { actions = [] } = await get('/docker/actions/log');
+    const { actions = [] } = await get('/docker/actions/log', { swr: true });
     document.getElementById('action-count').textContent = num(actions.length);
 
     if (!actions.length) {
@@ -503,7 +503,7 @@ async function loadGraph() {
   if (!host || typeof cytoscape === 'undefined') return;
 
   try {
-    const data = await get('/docker/graph');
+    const data = await get('/docker/graph', { swr: true });
     const elements = [
       ...(data.nodes || []).map((n) => ({ data: { id: n.id, label: n.label, kind: n.kind, raw: n.data } })),
       ...(data.edges || []).map((e) => ({ data: { source: e.source, target: e.target, type: e.type, label: e.label } })),

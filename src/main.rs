@@ -609,6 +609,10 @@ fn build_router(state: AppState) -> Router {
         // from a CDN or a shared crate at runtime, so a VPN-only box with no
         // egress renders identically to one with internet access.
         .nest_service("/static", tower_http::services::ServeDir::new("static"))
+        // Cache-Control on data endpoints: the browser can serve from its own
+        // cache for 5s and stale-while-revalidate for 30s more, eliminating the
+        // round trip on back-button and rapid tab switches.
+        .layer(axum::middleware::from_fn(headers::cache_control))
         // Global safe mode: refuse destructive host mutations while engaged, on
         // the outermost layer so a frozen box turns them away before any handler
         // (or the DB) sees them. Reads the atomic only — no per-request DB hit.

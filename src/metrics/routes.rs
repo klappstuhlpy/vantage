@@ -28,15 +28,20 @@ use crate::AppState;
 struct AdminMetricsTemplate {
     account: Option<Account>,
     active_page: &'static str,
+    initial_json: String,
 }
 
-async fn metrics_page(account: Account) -> Result<AdminMetricsTemplate, StatusCode> {
+async fn metrics_page(State(state): State<AppState>, account: Account) -> Result<AdminMetricsTemplate, StatusCode> {
     if !account.is_admin() {
         return Err(StatusCode::FORBIDDEN);
     }
+    let host = metrics::fetch_current(&state.db).await;
+    let containers = metrics::docker::collect().await.unwrap_or_default();
+    let initial = CurrentResponse { host, containers };
     Ok(AdminMetricsTemplate {
         account: Some(account),
         active_page: "metrics",
+        initial_json: serde_json::to_string(&initial).unwrap_or_default(),
     })
 }
 

@@ -10,7 +10,7 @@
 //! this handler already had to touch, and rendering them server-side means the
 //! page has real content in its first paint rather than a grid of spinners.
 
-use crate::{health, proxy, session::Account, AppState};
+use crate::{health, metrics, proxy, session::Account, AppState};
 use askama::Template;
 use axum::{extract::State, routing::get, Router};
 
@@ -30,6 +30,7 @@ struct DashboardTemplate {
     docker_available: bool,
     firewall_available: bool,
     cloudflare_available: bool,
+    initial_metrics: String,
 }
 
 async fn page(State(state): State<AppState>, account: Account) -> DashboardTemplate {
@@ -44,6 +45,9 @@ async fn page(State(state): State<AppState>, account: Account) -> DashboardTempl
         .count();
     let proxy_routes = proxy::storage::list_routes(&state).await.unwrap_or_default();
 
+    let host = metrics::fetch_current(&state.db).await;
+    let initial_metrics = serde_json::json!({ "host": host }).to_string();
+
     DashboardTemplate {
         account: Some(account),
         active_page: "home",
@@ -55,6 +59,7 @@ async fn page(State(state): State<AppState>, account: Account) -> DashboardTempl
         docker_available: state.docker().is_some(),
         firewall_available: state.firewall_backend().is_some(),
         cloudflare_available: state.cloudflare.is_some(),
+        initial_metrics,
     }
 }
 

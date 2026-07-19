@@ -50,13 +50,31 @@ const linkAll = (href, label) => h('a', { class: 'w-more', href }, label, icon('
 // The four resource widgets would otherwise each fetch /metrics/current on
 // load. One in-flight promise, shared: the endpoint is cheap but four identical
 // requests on every page load is just sloppy.
+// The server embeds the current metrics snapshot in the page so the 4 host
+// widgets can paint on first frame without waiting for a fetch.
+const embeddedMetrics = (() => {
+  try {
+    const el = document.getElementById('initial-metrics');
+    if (!el) return null;
+    const data = JSON.parse(el.textContent);
+    el.remove();
+    return data;
+  } catch { return null; }
+})();
+
 let metricsPromise = null;
 let metricsAt = 0;
 function currentMetrics() {
   const now = Date.now();
   if (!metricsPromise || now - metricsAt > 2000) {
+    // On first call, use the embedded data if available.
+    if (embeddedMetrics && !metricsPromise) {
+      metricsAt = now;
+      metricsPromise = Promise.resolve(embeddedMetrics);
+      return metricsPromise;
+    }
     metricsAt = now;
-    metricsPromise = get('/metrics/current');
+    metricsPromise = get('/metrics/current', { swr: true });
   }
   return metricsPromise;
 }
@@ -153,7 +171,7 @@ widgets.register({
   sizes: ['m', 'l'],
   href: '/metrics',
   blurb: 'Sparkline of recent CPU',
-  load: () => get('/metrics/history?range=1h'),
+  load: () => get('/metrics/history?range=1h', { swr: true }),
   render: (el, data) => {
     const points = data?.points || [];
     if (points.length < 2) {
@@ -183,7 +201,7 @@ widgets.register({
   load: async () => {
     // Update badges are a nice-to-have: if the checker is disabled or has not
     // run, the board must still render.
-    const [services, updates] = await Promise.all([get('/docker/services/data'), get('/api/updates').catch(() => [])]);
+    const [services, updates] = await Promise.all([get('/docker/services/data', { swr: true }), get('/api/updates', { swr: true }).catch(() => [])]);
     return { services, updates };
   },
   render: (el, { services, updates }) => {
@@ -227,7 +245,7 @@ widgets.register({
   href: '/monitors',
   blurb: 'Uptime probe board',
   topic: 'health',
-  load: () => get('/monitors/data'),
+  load: () => get('/monitors/data', { swr: true }),
   render: (el, d) => {
     if (!d?.total_targets) {
       render(el, emptyState({ icon: 'heart-pulse', title: 'No monitors yet', sub: 'Add an uptime probe to watch a service from the outside.', action: h('a', { class: 'btn sm', href: '/monitors' }, 'Add a monitor') }));
@@ -262,7 +280,7 @@ widgets.register({
   href: '/monitors',
   blurb: 'Currently firing incidents',
   topic: 'health.event',
-  load: () => get('/monitors/data'),
+  load: () => get('/monitors/data', { swr: true }),
   render: (el, d) => {
     const open = d?.open_incidents || [];
     if (!open.length) {
@@ -290,7 +308,7 @@ widgets.register({
   needs: 'firewall',
   href: '/firewall',
   blurb: 'Rules and active lockouts',
-  load: () => get('/firewall/data'),
+  load: () => get('/firewall/data', { swr: true }),
   render: (el, d) => {
     const rules = d?.rules || [];
     const lockouts = d?.lockouts || [];
@@ -316,7 +334,7 @@ widgets.register({
   sizes: ['s', 'm'],
   href: '/secrets',
   blurb: 'Open scanner findings',
-  load: () => get('/secrets/data'),
+  load: () => get('/secrets/data', { swr: true }),
   render: (el, d) => {
     if (!d?.scanner_enabled) {
       render(el, emptyState({ title: 'Scanner is off', sub: 'Set secret_scan_paths in config.json to scan this host.', degraded: true }));
@@ -344,7 +362,7 @@ widgets.register({
   needs: 'cloudflare',
   href: '/security',
   blurb: 'Zone traffic & threats (24h)',
-  load: () => get('/security/cloudflare?range=24h'),
+  load: () => get('/security/cloudflare?range=24h', { swr: true }),
   render: (el, d) => {
     const s = d?.summary;
     if (!s) {

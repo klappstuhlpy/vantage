@@ -246,38 +246,66 @@ function renderCharts(points) {
 
 async function loadCurrent() {
   try {
-    const data = await get('/metrics/current');
-    if (data.host && prev && data.host.ts === prev.ts) return; // same sample, nothing moved
-    renderTiles(data.host);
-    if (data.host) prev = data.host;
-    renderContainers(data.containers || []);
+    const data = await get('/metrics/current', { swr: true, onRefresh: refreshCurrent });
+    applyCurrentData(data);
   } catch (e) {
     reportError(e, "Couldn't load metrics");
   }
 }
 
+function refreshCurrent(data) {
+  try { applyCurrentData(data); } catch {}
+}
+
+function applyCurrentData(data) {
+  if (data.host && prev && data.host.ts === prev.ts) return;
+  renderTiles(data.host);
+  if (data.host) prev = data.host;
+  renderContainers(data.containers || []);
+}
+
 async function loadHistory() {
   try {
-    const data = await get(`/metrics/history?range=${encodeURIComponent(range)}`);
+    const data = await get(`/metrics/history?range=${encodeURIComponent(range)}`, { swr: true, onRefresh: refreshHistory });
     renderCharts(data.points || []);
   } catch (e) {
     reportError(e, "Couldn't load history");
   }
 }
 
+function refreshHistory(data) {
+  try { renderCharts(data.points || []); } catch {}
+}
+
 /* =======================================================================
    Boot
    ======================================================================= */
 
-render(tilesEl, ...Array.from({ length: 5 }, () => h('div', { class: 'stat' }, h('div', { class: 'skel skel-line', style: { width: '40%' } }), h('div', { class: 'skel skel-line', style: { width: '65%', height: '20px' } }))));
-render(bodyEl, ...skeletonRows(5, 3));
+// If the server embedded the initial data in the page, use it immediately —
+// no fetch, no skeleton, paint on first frame.
+const embedded = (() => {
+  try {
+    const el = document.getElementById('initial-data');
+    if (!el) return null;
+    const data = JSON.parse(el.textContent);
+    el.remove();
+    return data;
+  } catch { return null; }
+})();
+
+if (embedded) {
+  applyCurrentData(embedded);
+} else {
+  render(tilesEl, ...Array.from({ length: 5 }, () => h('div', { class: 'stat' }, h('div', { class: 'skel skel-line', style: { width: '40%' } }), h('div', { class: 'skel skel-line', style: { width: '65%', height: '20px' } }))));
+  render(bodyEl, ...skeletonRows(5, 3));
+}
 
 wireSegmented(document.getElementById('range-picker'), (v) => {
   range = v;
   loadHistory();
 });
 
-loadCurrent();
+if (!embedded) loadCurrent();
 loadHistory();
 
 // Live tiles. The payload matches /metrics/current, so both paths render
