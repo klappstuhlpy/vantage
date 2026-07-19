@@ -5,9 +5,12 @@
  * state: it reuses the bootstrap's keys and apply() rather than restating them,
  * so there is exactly one definition of what "compact" means.
  *
- * Preferences are per-browser (localStorage). Per-account server persistence is
- * a listed stretch goal; nothing here assumes a backend.
+ * Preferences are dual-persisted: localStorage for instant paint (no flash),
+ * server for cross-device sync. The server blob is fetched once and merged; on
+ * every write we save both.
  */
+
+import * as prefs from './prefs.js';
 
 const boot = window.__vantage_theme;
 
@@ -25,6 +28,10 @@ function write(key, value) {
     // Storage can be unavailable (private mode, disabled cookies). The choice
     // still applies to this page; it just won't survive a reload.
   }
+}
+
+function syncToServer() {
+  prefs.save({ theme: state.theme, accent: state.accent, density: state.density, sidebar: state.sidebar });
 }
 
 function apply() {
@@ -53,6 +60,7 @@ export function setTheme(pref) {
   state.theme = pref;
   write(KEYS.theme, pref);
   apply();
+  syncToServer();
 }
 
 /** @param {'radar'|'phosphor'|'amber'|'ion'|'ember'} name */
@@ -60,6 +68,7 @@ export function setAccent(name) {
   state.accent = name;
   write(KEYS.accent, name);
   apply();
+  syncToServer();
 }
 
 /** @param {'comfortable'|'compact'} value */
@@ -67,6 +76,7 @@ export function setDensity(value) {
   state.density = value;
   write(KEYS.density, value);
   apply();
+  syncToServer();
 }
 
 /** @param {'full'|'rail'} value */
@@ -74,6 +84,7 @@ export function setSidebar(value) {
   state.sidebar = value;
   write(KEYS.sidebar, value);
   apply();
+  syncToServer();
 }
 
 export function toggleSidebar() {
@@ -114,3 +125,18 @@ export const ACCENTS = [
   { id: 'ion', label: 'Ion', hex: '#A78BFA' },
   { id: 'ember', label: 'Ember', hex: '#F97066' },
 ];
+
+// On load: pull remote prefs and apply any that differ from local. This is the
+// cross-device sync path — a new browser session gets the server's state.
+prefs.load().then((remote) => {
+  if (!remote) return;
+  let changed = false;
+  for (const key of ['theme', 'accent', 'density', 'sidebar']) {
+    if (remote[key] && remote[key] !== state[key]) {
+      state[key] = remote[key];
+      write(KEYS[key], remote[key]);
+      changed = true;
+    }
+  }
+  if (changed) apply();
+});

@@ -29,6 +29,7 @@ struct DashboardTemplate {
     /// Docker socket doesn't fire a round of doomed fetches on every load.
     docker_available: bool,
     firewall_available: bool,
+    cloudflare_available: bool,
 }
 
 async fn page(State(state): State<AppState>, account: Account) -> DashboardTemplate {
@@ -53,6 +54,7 @@ async fn page(State(state): State<AppState>, account: Account) -> DashboardTempl
         proxy_route_count: proxy_routes.len(),
         docker_available: state.docker().is_some(),
         firewall_available: state.firewall_backend().is_some(),
+        cloudflare_available: state.cloudflare.is_some(),
     }
 }
 

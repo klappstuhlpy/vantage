@@ -111,6 +111,7 @@ pub fn routes() -> Router<AppState> {
         .route("/account/totp/enable", post(totp_enable))
         .route("/account/totp/disable", post(totp_disable))
         .route("/account/recovery", post(regenerate_recovery_codes))
+        .route("/account/prefs", get(get_prefs).put(put_prefs))
 }
 
 // ─── Page ────────────────────────────────────────────────────────────────────
@@ -539,6 +540,55 @@ pub fn user_agent_of(headers: &HeaderMap) -> Option<String> {
         return None;
     }
     Some(value.chars().take(300).collect())
+}
+
+// ─── Preferences ────────────────────────────────────────────────────────────
+
+const PREFS_MAX_BYTES: usize = 8192;
+
+async fn get_prefs(account: Account, State(state): State<AppState>) -> Result<Json<serde_json::Value>, StatusCode> {
+    let id = account.id;
+    let row: Option<String> = state
+        .db
+        .call(move |conn| {
+            conn.query_row("SELECT prefs FROM user_prefs WHERE account_id = ?1", [id], |r| r.get(0))
+                .ok()
+        })
+        .await;
+    let value = match row {
+        Some(json) => serde_json::from_str(&json).unwrap_or(serde_json::json!({})),
+        None => serde_json::json!({}),
+    };
+    Ok(Json(value))
+}
+
+async fn put_prefs(
+    account: Account,
+    State(state): State<AppState>,
+    body: axum::body::Bytes,
+) -> Result<StatusCode, (StatusCode, &'static str)> {
+    if body.len() > PREFS_MAX_BYTES {
+        return Err((StatusCode::PAYLOAD_TOO_LARGE, "preferences payload too large"));
+    }
+    let json: serde_json::Value =
+        serde_json::from_slice(&body).map_err(|_| (StatusCode::BAD_REQUEST, "invalid JSON"))?;
+    if !json.is_object() {
+        return Err((StatusCode::BAD_REQUEST, "preferences must be a JSON object"));
+    }
+    let text = json.to_string();
+    let id = account.id;
+    state
+        .db
+        .call(move |conn| {
+            conn.execute(
+                "INSERT INTO user_prefs (account_id, prefs, updated_at) VALUES (?1, ?2, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+                 ON CONFLICT(account_id) DO UPDATE SET prefs = excluded.prefs, updated_at = excluded.updated_at",
+                rusqlite::params![id, text],
+            )
+        })
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "could not save preferences"))?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[cfg(test)]

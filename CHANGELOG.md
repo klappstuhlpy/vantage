@@ -8,15 +8,42 @@ as interpreted for an operator-facing control plane: MAJOR for a breaking change
 to the config file or a removed feature, MINOR for a new capability, PATCH for
 fixes and polish.
 
-## [Unreleased]
+## [0.4.0] - 2026-07-19
+
+### Added
+
+- **The database console is now a full studio.** The old console was a text box, a Run button and a results table; the new one is a proper database tool built around the same security model:
+  - **Schema explorer** — a filterable tree of every table and view in the selected source, with columns, types, primary keys, foreign keys and indexes visible per-table without writing a query. Introspection is audited once per session per source.
+  - **Table browser** — click a table to page through its rows in a grid. Filter by column (structured `{column, op, value}` — never SQL fragments), sort by any column, and see NULL distinguished from the text "NULL". An unknown filter column is refused by name, not silently dropped.
+  - **Inline editing** — stage cell edits, inserts and row deletions in the browser, preview the exact SQL that will run (with bound parameters), then apply the batch in one transaction. Every statement addresses exactly one row by full primary key; the transaction verifies each affected exactly 1 row and rolls back the whole batch otherwise. Editing requires danger mode *and* a fresh sudo re-authentication (the same two gates the raw query runner now demands).
+  - **CSV / NDJSON export** — stream the filtered view of any table as a download. Exports are audited with the source, table, filters, format and the row count that actually left.
+  - **EXPLAIN plans** — run `EXPLAIN QUERY PLAN` (SQLite) or `EXPLAIN (FORMAT JSON)` (Postgres) on any query and see the plan as a tree.
+  - **DDL view** — see the `CREATE` statement for any table (SQLite: verbatim from `sqlite_master`; Postgres: reconstructed from introspection).
+  - **Query history** — the last 200 queries per account, with source, result, row count and timing. History is a bounded recent buffer, not a durable archive — the audit log remains the real record. History can be cleared.
+  - **Saved queries** — name and bookmark SQL you want to keep, per account.
+  - **Query cancellation** — cancel a long-running query from the UI. The client generates a run_id per execution; the cancel endpoint verifies ownership (account A cannot cancel account B's query) and fires the handle (`sqlite3_interrupt` / Postgres out-of-band cancel).
+  - **Entity-relationship diagram** — a live ERD drawn from foreign-key introspection, with click-to-open on any table.
+  - **CodeMirror 6 editor** — syntax highlighting, autocompletion, multi-cursor, Ctrl+Enter to run, selection-run, and Explain on the current selection.
+  - **Tabbed interface** — open multiple query tabs and table-browser tabs side by side; tab state persists in `sessionStorage` across reloads.
+  - **Ctrl+P jump** — a quick-open palette scoped to the current schema tree: jump to any table without scrolling.
+- **`Ctrl`+`K` now finds database sources.** The spotlight palette indexes every configured SQLite and Postgres database, so you can jump straight to any source from anywhere in the app.
+- **Security headers on every response.** A strict Content-Security-Policy (`default-src 'self'`; `script-src 'self'`; `style-src 'self'`; `object-src 'none'`; `base-uri 'none'`; `frame-ancestors 'none'`) is now set alongside `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and a `Permissions-Policy` that disables everything the app does not use. The policy is enforced by default; set `csp_report_only: true` in `config.json` for a first-run discovery period.
+- **Per-account preferences sync across devices.** Theme, accent, density, sidebar and widget layout are now dual-persisted — localStorage for instant paint, server for cross-device sync. A new browser session pulls the server state and applies it without a flash; every change debounces back to the server in the background. Endpoint: `GET/PUT /account/prefs`.
+- **Cloudflare analytics widget on the home dashboard.** If `cloudflare.api_token` and `cloudflare.zone_id` are configured, the widget catalogue gains a "Cloudflare" card showing zone requests, cache rate, threats, bandwidth and page views for the last 24 hours. Without credentials the widget degrades to a descriptive placeholder.
 
 ### Changed
 
 - **`config.json` now fills in settings it is missing when Vantage starts.** Upgrading used to leave your config file exactly as it was, so options added since you wrote it — `sqlite_sources` and `postgres_url` among them — worked but never appeared in the file, and the only way to find out one existed was to read the release notes. New keys are now written in with their defaults, so opening the file shows you everything there is to configure. Values you have already set are left untouched, as is anything Vantage doesn't recognise.
+- **Running a danger-mode query now requires sudo.** Disabling safe mode on the console was previously enough to run an unguarded `DELETE`; it now additionally requires a re-authentication inside the 10-minute sudo window — the same gate every other destructive action in Vantage sits behind. The reauth modal appears automatically and the query retries transparently.
+- **Applying staged edits is frozen by global safe mode.** Engaging safe mode from the top bar now blocks `POST /database/apply` at the middleware layer, the same way it blocks container, firewall, proxy and script mutations. The rest of the console — browsing, querying, previewing — stays reachable, because safe mode's job is to freeze the host, and the console is also the tool you diagnose with while everything else is frozen.
+- **Query results distinguish NULL from empty string.** Cells that are SQL NULL are now a real JSON `null` in the API and render as a greyed-out `NULL` badge in the grid, rather than appearing identical to a TEXT column that happens to spell "NULL".
 
 ### Fixed
+
 - **Cloudflare analytics work again.** The deprecated `httpRequests1mGroups` dataset has been retired — the security page now queries `httpRequests1hGroups` (hourly buckets, same fields including threats), restoring the traffic chart and threat totals.
 - Added more margin to the flag item in security recent events table for better readability.
+- **The Docker events feed broke under the new CSP** — it used an inline `style="max-height: 260px"` attribute, which `style-src 'self'` forbids. The height is now a proper CSS class.
+- The cron scheduler's match logic was nested deeper than necessary; refactored for clarity (no behaviour change).
 
 ## [0.3.0] - 2026-07-18
 

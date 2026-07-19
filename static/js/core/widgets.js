@@ -18,14 +18,15 @@
  *     needs: 'docker',                    optional capability gate (see CAPS)
  *   }
  *
- * Layout lives in localStorage (per browser). Per-account server persistence is
- * the first stretch item; nothing here assumes a backend, and the storage shape
- * is versioned so it can be migrated when one arrives.
+ * Layout is dual-persisted: localStorage for instant load, server for
+ * cross-device sync. The server blob carries a `widgets` key whose shape is the
+ * same versioned format localStorage uses.
  */
 
 import { h, icon, render, emptyState, toast } from './ui.js';
 import { ApiError } from './api.js';
 import * as live from './live.js';
+import * as prefs from './prefs.js';
 
 const STORE_KEY = 'vantage.dashboard.v1';
 const SIZES = { s: 3, m: 6, l: 12 };
@@ -60,6 +61,7 @@ function saveLayout() {
   } catch {
     toast('warn', "Couldn't save your layout", 'Browser storage is unavailable, so this arrangement lasts until you reload.');
   }
+  prefs.save({ widgets: layout });
 }
 
 /* =======================================================================
@@ -175,10 +177,11 @@ async function paint(card, body, def, entry) {
   }
 }
 
-const CAP_LABEL = { docker: "Docker isn't reachable", firewall: 'No firewall backend' };
+const CAP_LABEL = { docker: "Docker isn't reachable", firewall: 'No firewall backend', cloudflare: 'Cloudflare not configured' };
 const CAP_SUB = {
   docker: 'The Docker socket did not answer, so container widgets have nothing to show.',
   firewall: 'Vantage did not detect nftables, ufw or iptables on this host.',
+  cloudflare: 'Set cloudflare.api_token and cloudflare.zone_id in config.json to enable zone analytics.',
 };
 
 /* =======================================================================
@@ -495,6 +498,15 @@ export function start({ grid, defaults, caps = {} }) {
   ctx = { caps };
   layout = loadLayout(defaults);
   renderGrid();
+
+  prefs.load().then((remote) => {
+    if (!remote?.widgets || !Array.isArray(remote.widgets)) return;
+    const remoteValid = remote.widgets.filter((w) => registry.has(w.id));
+    if (JSON.stringify(remoteValid) === JSON.stringify(layout)) return;
+    layout = remoteValid;
+    try { localStorage.setItem(STORE_KEY, JSON.stringify({ v: 1, widgets: layout })); } catch {}
+    renderGrid();
+  });
 
   document.getElementById('edit-toggle')?.addEventListener('click', () => setEditing(!editing));
   document.getElementById('gallery-btn')?.addEventListener('click', openGallery);

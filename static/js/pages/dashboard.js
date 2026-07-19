@@ -332,6 +332,44 @@ widgets.register({
 });
 
 /* =======================================================================
+   Cloudflare
+   ======================================================================= */
+
+widgets.register({
+  id: 'cloudflare',
+  title: 'Cloudflare',
+  icon: 'shield',
+  size: 'm',
+  sizes: ['s', 'm', 'l'],
+  needs: 'cloudflare',
+  href: '/security',
+  blurb: 'Zone traffic & threats (24h)',
+  load: () => get('/security/cloudflare?range=24h'),
+  render: (el, d) => {
+    const s = d?.summary;
+    if (!s) {
+      render(el, emptyState({ icon: 'shield', title: 'No data', sub: 'Cloudflare returned no analytics for this zone.' }));
+      return;
+    }
+    const cacheRate = s.total_requests ? ((s.cached_requests / s.total_requests) * 100).toFixed(1) : '0';
+    render(
+      el,
+      h(
+        'div',
+        { class: 'w-head-row' },
+        readout(num(s.total_requests), 'requests · 24h'),
+        s.threats ? pill('down', `${num(s.threats)} threats`) : pill('ok', 'no threats')
+      ),
+      lines([
+        ['Cached', `${cacheRate}%`],
+        ['Bandwidth', bytes(s.bytes)],
+        ['Page views', num(s.page_views)],
+      ])
+    );
+  },
+});
+
+/* =======================================================================
    Boot
    ======================================================================= */
 
@@ -343,6 +381,7 @@ widgets.start({
     // Askama renders a bool as "true"/"false".
     docker: grid.dataset.docker === 'true',
     firewall: grid.dataset.firewall === 'true',
+    cloudflare: grid.dataset.cloudflare === 'true',
   },
   // The default view answers "is this box healthy?" before anything else.
   defaults: [
