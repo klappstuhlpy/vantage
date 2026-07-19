@@ -504,6 +504,10 @@ pub fn spawn_event_watcher(state: AppState) {
                             "start" | "stop" | "die" | "create" | "destroy" | "rename" | "restart" | "kill"
                         ) {
                             docker.invalidate().await;
+                            // The service cards read a separate `docker inspect`
+                            // snapshot; a state change invalidates that too, so
+                            // the push and the cards can't disagree.
+                            routes::invalidate_service_cache().await;
                         }
                         let data = serde_json::to_value(&msg).unwrap_or_default();
                         state.live_publish("docker", data);

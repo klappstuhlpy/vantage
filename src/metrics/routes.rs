@@ -36,7 +36,7 @@ async fn metrics_page(State(state): State<AppState>, account: Account) -> Result
         return Err(StatusCode::FORBIDDEN);
     }
     let host = metrics::fetch_current(&state.db).await;
-    let containers = metrics::docker::collect().await.unwrap_or_default();
+    let containers = metrics::docker::collect_cached().await;
     let initial = CurrentResponse { host, containers };
     Ok(AdminMetricsTemplate {
         account: Some(account),
@@ -57,7 +57,7 @@ async fn current_metrics(State(state): State<AppState>, account: Account) -> Res
         return Err(StatusCode::FORBIDDEN);
     }
     let host = metrics::fetch_current(&state.db).await;
-    let containers = metrics::docker::collect().await.unwrap_or_default();
+    let containers = metrics::docker::collect_cached().await;
     Ok(Json(CurrentResponse { host, containers }))
 }
 

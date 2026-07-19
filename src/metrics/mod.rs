@@ -86,6 +86,10 @@ async fn scrape_once(state: &AppState) -> anyhow::Result<()> {
         tracing::warn!(target: "metrics", error = %e, "docker::collect failed (continuing)");
         Vec::new()
     });
+    // This scrape is the only `docker stats` the box should normally run: publish
+    // it so the /metrics and /docker request handlers read a snapshot instead of
+    // each spawning their own (see `docker::collect_cached`).
+    docker::store(containers.clone()).await;
     let ts = time::OffsetDateTime::now_utc().unix_timestamp();
 
     storage::insert_sample(&state.db, ts, &sample).await?;

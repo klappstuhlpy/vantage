@@ -97,7 +97,10 @@ tokio = { version = "1.36.0", features = ["rt-multi-thread", "net", "macros", "s
 nanoid = "0.4"
 # Error types for SSH parsing and directory preparation errors.
 thiserror = "2"
-tower-http = { version = "0.5.2", features = ["fs"] }
+# "compression-*"/"set-header": `static/` is 1.5 MB across 89 files (CodeMirror
+# and Cytoscape alone are 800 KB); served bare it was re-downloaded uncompressed
+# on every hard refresh. See the ServeDir stack in `build_router`.
+tower-http = { version = "0.5.2", features = ["fs", "compression-gzip", "compression-br"] }
 tracing = "0.1.40"
 # Rolling JSON file log (the admin app is a production service; the log viewer
 # reads these files). Same appender the site uses.

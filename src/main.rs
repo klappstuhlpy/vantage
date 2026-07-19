@@ -609,10 +609,17 @@ fn build_router(state: AppState) -> Router {
         // from a CDN or a shared crate at runtime, so a VPN-only box with no
         // egress renders identically to one with internet access.
         .nest_service("/static", tower_http::services::ServeDir::new("static"))
-        // Cache-Control on data endpoints: the browser can serve from its own
-        // cache for 5s and stale-while-revalidate for 30s more, eliminating the
-        // round trip on back-button and rapid tab switches.
+        // Cache-Control: a short private window on the data endpoints the
+        // frontend polls, and a longer public one on `/static` — which had no
+        // caching at all, so a hard refresh re-fetched the whole 1.5 MB asset
+        // tree. See `headers::cache_control`.
         .layer(axum::middleware::from_fn(headers::cache_control))
+        // Compression. The two vendored bundles (`codemirror` 430 KB,
+        // `cytoscape` 372 KB) go out at roughly a quarter of the bytes, and the
+        // JSON endpoints benefit too. `CompressionLayer::new()` keeps
+        // tower-http's default predicate, which already declines to compress
+        // Server-Sent Events — the container-log stream must not be buffered.
+        .layer(tower_http::compression::CompressionLayer::new())
         // Global safe mode: refuse destructive host mutations while engaged, on
         // the outermost layer so a frozen box turns them away before any handler
         // (or the DB) sees them. Reads the atomic only — no per-request DB hit.

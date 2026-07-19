@@ -7,8 +7,12 @@
 //!
 //! Ported verbatim from the monolith's `admin/metrics/docker.rs`.
 
+use std::time::Duration;
+
 use kls_agent::exec::{HostCommand, Tool};
 use serde::{Deserialize, Serialize};
+
+use crate::cached::TimedCachedValue;
 
 /// One container row from `docker stats`.
 #[derive(Debug, Clone, Default, Serialize)]
@@ -37,8 +41,73 @@ struct RawStat {
     net_io: String,
 }
 
+// ─── Request-path cache ───────────────────────────────────────────────────────
+//
+// `docker stats --no-stream` is *expensive*: the daemon walks every container's
+// cgroup and the call takes 1–3 s pegging a core. It used to run on the request
+// path — the `/metrics` page render, every `/metrics/current` poll, and every
+// `/docker/services/data` poll — so a couple of open tabs kept it running
+// essentially continuously. That was the CPU spike, and, because each caller
+// awaited a fresh run, the reason metrics "always loaded new".
+//
+// Now there is exactly one producer worth speaking of: the metrics collector,
+// which already scrapes every `SCRAPE_INTERVAL` (30 s) and calls [`store`] with
+// what it got. Request handlers call [`collect_cached`] and are served from that
+// snapshot. The TTL is deliberately longer than the scrape interval so the cache
+// is warm between scrapes; the refresh path below only fires when the collector
+// is absent or has fallen behind.
+
+/// How long a `docker stats` snapshot stays servable. Longer than
+/// [`super::SCRAPE_INTERVAL`] so the collector keeps it warm on its own.
+const STATS_TTL: Duration = Duration::from_secs(45);
+
+fn stats_cache() -> &'static TimedCachedValue<Vec<DockerStat>> {
+    static CACHE: std::sync::OnceLock<TimedCachedValue<Vec<DockerStat>>> = std::sync::OnceLock::new();
+    CACHE.get_or_init(|| TimedCachedValue::new(STATS_TTL))
+}
+
+/// Serialises the refresh path so that N concurrent cache misses produce *one*
+/// `docker stats`, not N. Without this the expiry moment is a thundering herd —
+/// precisely when the box is least able to absorb it.
+fn refresh_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(Default::default)
+}
+
+/// Publishes a freshly-scraped snapshot. Called by the metrics collector so the
+/// scrape it already performs doubles as the cache fill.
+pub async fn store(stats: Vec<DockerStat>) {
+    let _ = stats_cache().set(stats).await;
+}
+
+/// The cached container list — what every HTTP handler should call.
+///
+/// Returns an empty Vec rather than an error when Docker is unavailable: every
+/// caller already degraded that way via `unwrap_or_default`, and a handler has
+/// nothing useful to do with the distinction.
+pub async fn collect_cached() -> Vec<DockerStat> {
+    if let Some(hit) = stats_cache().get().await {
+        return hit.clone();
+    }
+    // Miss. Take the refresh lock, then re-check — the holder we waited on has
+    // almost certainly just filled the cache for us.
+    let _guard = refresh_lock().lock().await;
+    if let Some(hit) = stats_cache().get().await {
+        return hit.clone();
+    }
+    let fresh = collect().await.unwrap_or_else(|e| {
+        tracing::warn!(target: "metrics", error = %e, "docker stats refresh failed");
+        Vec::new()
+    });
+    let _ = stats_cache().set(fresh.clone()).await;
+    fresh
+}
+
 /// Returns one [`DockerStat`] per running container. Returns Err if `docker`
 /// isn't available; an empty Vec if it ran but no containers are up.
+///
+/// **Prefer [`collect_cached`] on any request path** — this spawns the real
+/// subprocess every time.
 pub async fn collect() -> anyhow::Result<Vec<DockerStat>> {
     let out = HostCommand::new(Tool::Docker)
         .args(["stats", "--no-stream", "--format", "{{json .}}"])
@@ -138,6 +207,26 @@ mod tests {
     fn pct_parsing() {
         assert!((parse_percent("12.34%") - 12.34).abs() < 1e-9);
         assert_eq!(parse_percent("0.00%"), 0.0);
+    }
+
+    /// The point of the cache: once the collector has published a snapshot, a
+    /// request handler is served from it and never spawns `docker stats`. This
+    /// runs in an environment with no Docker daemon at all — if `collect_cached`
+    /// reached for the subprocess it would come back empty, so a non-empty result
+    /// *is* the proof that it read the stored snapshot.
+    #[tokio::test]
+    async fn a_stored_snapshot_serves_readers_without_running_docker() {
+        store(vec![DockerStat {
+            name: "web".into(),
+            cpu_pct: 12.5,
+            ..Default::default()
+        }])
+        .await;
+
+        let served = collect_cached().await;
+        assert_eq!(served.len(), 1, "the stored snapshot should have been served");
+        assert_eq!(served[0].name, "web");
+        assert!((served[0].cpu_pct - 12.5).abs() < 1e-9);
     }
 
     #[test]

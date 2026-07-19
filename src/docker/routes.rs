@@ -64,58 +64,129 @@ pub struct ServiceStatus {
 
 // ─── Docker process helpers ───────────────────────────────────────────────────
 
-fn is_docker_running(identifier: &str) -> bool {
-    HostCommand::new(Tool::Docker)
-        .args([
-            "ps",
-            "--filter",
-            &format!("name={identifier}"),
-            "--format",
-            "{{.Names}}",
-        ])
-        .output_blocking()
-        .map(|o| String::from_utf8_lossy(&o.stdout).contains(identifier))
-        .unwrap_or(false)
+/// Everything the two service views need about one container, from a single
+/// `docker inspect`.
+#[derive(Clone, Default)]
+struct ServiceSnapshot {
+    /// The container identifier this was inspected under — `docker stats` reports
+    /// container names, so the JSON view joins its stats row on this, not on the
+    /// service's display name.
+    identifier: String,
+    running: bool,
+    started_at: Option<OffsetDateTime>,
+    image: Option<String>,
+    short_id: Option<String>,
+    restart_count: Option<u32>,
 }
 
-fn docker_started_at(identifier: &str) -> Option<OffsetDateTime> {
-    let out = HostCommand::new(Tool::Docker)
-        .args(["inspect", "-f", "{{.State.StartedAt}}", identifier])
-        .output_blocking()
-        .ok()?;
-    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if s.is_empty() || s.contains("Error") {
-        return None;
-    }
-    OffsetDateTime::parse(&s, &time::format_description::well_known::Rfc3339).ok()
-}
-
-/// Returns `(image, short_id, restart_count)` via `docker inspect`.
-fn docker_details(identifier: &str) -> (Option<String>, Option<String>, Option<u32>) {
+/// Inspect one container. One subprocess, awaited — not three, and not blocking.
+///
+/// This replaced a `docker ps` + two `docker inspect` calls that each used
+/// `output_blocking()` *inside an async handler*. Run over N configured services
+/// that was 3N synchronous subprocess spawns holding a Tokio worker thread for
+/// the duration, which is what made the Docker and home pages take seconds and,
+/// with enough services or a slow daemon, starved the runtime of workers
+/// entirely — the "Could not reach the server" the operator was seeing was this,
+/// not the network.
+///
+/// `.State.Running` also makes the separate `docker ps` liveness probe redundant.
+async fn inspect_service(identifier: &str) -> ServiceSnapshot {
     let out = HostCommand::new(Tool::Docker)
         .args([
             "inspect",
             "--format",
-            "{{.Config.Image}}\t{{slice .Id 0 12}}\t{{.RestartCount}}",
+            "{{.State.Running}}\t{{.State.StartedAt}}\t{{.Config.Image}}\t{{slice .Id 0 12}}\t{{.RestartCount}}",
             identifier,
         ])
-        .output_blocking()
+        .output()
+        .await
         .ok();
 
+    // No such container (or no daemon): every field stays absent, which is the
+    // same "not running" card the old three-call path produced.
+    let absent = || ServiceSnapshot {
+        identifier: identifier.to_owned(),
+        ..Default::default()
+    };
     let Some(out) = out else {
-        return (None, None, None);
+        return absent();
     };
     let raw = String::from_utf8_lossy(&out.stdout);
     let s = raw.trim();
     if s.is_empty() || s.starts_with("Error") {
-        return (None, None, None);
+        return absent();
     }
 
-    let mut parts = s.splitn(3, '\t');
+    let mut parts = s.splitn(5, '\t');
+    let running = parts.next().map(|v| v.trim() == "true").unwrap_or(false);
+    let started_at = parts
+        .next()
+        .filter(|_| running)
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .and_then(|v| OffsetDateTime::parse(v, &time::format_description::well_known::Rfc3339).ok());
     let image = parts.next().filter(|s| !s.is_empty()).map(str::to_owned);
     let short_id = parts.next().filter(|s| !s.is_empty()).map(str::to_owned);
     let restart_count = parts.next().and_then(|s| s.trim().parse().ok());
-    (image, short_id, restart_count)
+
+    ServiceSnapshot {
+        identifier: identifier.to_owned(),
+        running,
+        started_at,
+        image,
+        short_id,
+        restart_count,
+    }
+}
+
+/// How long a service-status snapshot stays servable.
+///
+/// The Docker page polls every 15 s and the home dashboard fetches the same
+/// endpoint, so without this every open tab paid for its own fan-out. Container
+/// state changes are pushed on the `docker` live topic (and invalidate this
+/// cache), so a short TTL costs no freshness that matters.
+const SERVICES_TTL: std::time::Duration = std::time::Duration::from_secs(10);
+
+fn services_cache() -> &'static crate::cached::TimedCachedValue<Vec<(String, ServiceSnapshot)>> {
+    static CACHE: std::sync::OnceLock<crate::cached::TimedCachedValue<Vec<(String, ServiceSnapshot)>>> =
+        std::sync::OnceLock::new();
+    CACHE.get_or_init(|| crate::cached::TimedCachedValue::new(SERVICES_TTL))
+}
+
+fn services_refresh_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(Default::default)
+}
+
+/// Drops the cached snapshot so the next read reflects an action that just ran.
+pub(crate) async fn invalidate_service_cache() {
+    services_cache().invalidate().await;
+}
+
+/// Cached, concurrent status for every configured service, keyed by service name.
+///
+/// The inspects run concurrently rather than in sequence: the wall-clock cost is
+/// one inspect, not N.
+async fn service_snapshots(state: &AppState) -> Vec<(String, ServiceSnapshot)> {
+    if let Some(hit) = services_cache().get().await {
+        return hit.clone();
+    }
+    let _guard = services_refresh_lock().lock().await;
+    if let Some(hit) = services_cache().get().await {
+        return hit.clone();
+    }
+
+    let snapshots = futures_util::future::join_all(
+        state
+            .config
+            .services
+            .iter()
+            .map(|cfg| async { (cfg.name.clone(), inspect_service(&cfg.identifier).await) }),
+    )
+    .await;
+
+    let _ = services_cache().set(snapshots.clone()).await;
+    snapshots
 }
 
 /// Formats an [`OffsetDateTime`] as `YYYY-MM-DD HH:MM:SS+ZZ:ZZ` — the ISO-ish
@@ -313,26 +384,16 @@ async fn docker_page(State(state): State<AppState>, account: Account) -> Result<
         return Err(StatusCode::FORBIDDEN);
     }
 
-    let services = state
-        .config
-        .services
-        .iter()
-        .map(|cfg| {
-            let running = is_docker_running(&cfg.identifier);
-            let started_at = if running {
-                docker_started_at(&cfg.identifier).map(iso)
-            } else {
-                None
-            };
-            let (image, short_id, restart_count) = docker_details(&cfg.identifier);
-            ServiceStatus {
-                name: cfg.name.clone(),
-                running,
-                started_at,
-                image,
-                short_id,
-                restart_count,
-            }
+    let services = service_snapshots(&state)
+        .await
+        .into_iter()
+        .map(|(name, snap)| ServiceStatus {
+            name,
+            running: snap.running,
+            started_at: snap.started_at.map(iso),
+            image: snap.image,
+            short_id: snap.short_id,
+            restart_count: snap.restart_count,
         })
         .collect();
 
@@ -374,6 +435,10 @@ async fn service_action(State(state): State<AppState>, account: Account, Form(da
     }
 
     let (success, output) = perform_action(cfg.path.as_deref(), &cfg.identifier, &data.action).await;
+
+    // The action just changed exactly what the snapshot caches: serving the
+    // pre-action state for another 10 s would read as the button doing nothing.
+    invalidate_service_cache().await;
 
     // A state-changing privileged host op. Audited *after* the fact, with its
     // outcome: the old line was emitted before the action ran, so the log
@@ -454,31 +519,23 @@ async fn services_data(State(state): State<AppState>, account: Account) -> Resul
         return Err(StatusCode::FORBIDDEN);
     }
 
-    let stats: Vec<DockerStat> = crate::metrics::docker::collect().await.unwrap_or_default();
+    // Both halves are cached and independent, so overlap them: the whole endpoint
+    // costs one `docker inspect` fan-out at worst, and usually nothing at all.
+    let (stats, snapshots) = tokio::join!(crate::metrics::docker::collect_cached(), service_snapshots(&state));
     let stats_by_name: std::collections::HashMap<&str, &DockerStat> =
         stats.iter().map(|s| (s.name.as_str(), s)).collect();
 
-    let views = state
-        .config
-        .services
-        .iter()
-        .map(|cfg| {
-            let running = is_docker_running(&cfg.identifier);
-            let started_at = if running {
-                docker_started_at(&cfg.identifier)
-            } else {
-                None
-            };
-            let (image, short_id, restart_count) = docker_details(&cfg.identifier);
-            let stat = stats_by_name.get(cfg.identifier.as_str()).copied();
-
+    let views = snapshots
+        .into_iter()
+        .map(|(name, snap)| {
+            let stat = stats_by_name.get(snap.identifier.as_str()).copied();
             ServiceView {
-                name: cfg.name.clone(),
-                running,
-                started_at,
-                image,
-                short_id,
-                restart_count,
+                name,
+                running: snap.running,
+                started_at: snap.started_at,
+                image: snap.image,
+                short_id: snap.short_id,
+                restart_count: snap.restart_count,
                 cpu_pct: stat.map(|s| s.cpu_pct),
                 mem_used: stat.map(|s| s.mem_used),
                 mem_limit: stat.map(|s| s.mem_limit),

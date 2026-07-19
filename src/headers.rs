@@ -126,20 +126,49 @@ const SWR_PATHS: &[&str] = &[
 
 const SWR_HEADER: &str = "private, max-age=5, stale-while-revalidate=30";
 
-/// Sets `Cache-Control: private, max-age=5, stale-while-revalidate=30` on
-/// successful GET responses to data endpoints that the frontend polls. Applied
-/// after the inner handler so it only touches 2xx JSON — error and redirect
+/// Static assets — `/static/*`, served by `ServeDir`.
+///
+/// These carried *no* `Cache-Control` at all, so a hard refresh re-downloaded
+/// the whole 1.5 MB tree (`codemirror.bundle.js` is 430 KB, `cytoscape.min.js`
+/// 372 KB), which is what made the first load of the pages that use them feel
+/// broken.
+///
+/// The URLs are unversioned — there is no content hash in the filename — so this
+/// is deliberately *not* `immutable`. A short `max-age` with a long
+/// `stale-while-revalidate` means a repeat visit paints instantly from cache and
+/// revalidates in the background, and a deploy is picked up on the next
+/// revalidation rather than being pinned until the user clears their cache.
+///
+/// `public` is safe here and only here: these are the design system's own assets,
+/// identical for every visitor and served before any session exists. Everything
+/// else stays `private` — see [`SWR_HEADER`].
+const STATIC_HEADER: &str = "public, max-age=300, stale-while-revalidate=86400";
+
+/// Sets `Cache-Control` on successful GET responses: a short private window for
+/// the data endpoints the frontend polls, a longer public one for static assets.
+/// Applied after the inner handler so it only touches 2xx — error and redirect
 /// responses stay uncached.
 pub async fn cache_control(request: Request, next: Next) -> Response {
     let is_get = request.method() == axum::http::Method::GET;
-    let path_match = is_get && SWR_PATHS.iter().any(|p| request.uri().path().starts_with(p));
+    let path = request.uri().path();
+    let header = if !is_get {
+        None
+    } else if path.starts_with("/static/") {
+        Some(STATIC_HEADER)
+    } else if SWR_PATHS.iter().any(|p| path.starts_with(p)) {
+        Some(SWR_HEADER)
+    } else {
+        None
+    };
 
     let mut response = next.run(request).await;
 
-    if path_match && response.status().is_success() {
-        response
-            .headers_mut()
-            .insert("cache-control", HeaderValue::from_static(SWR_HEADER));
+    if let Some(header) = header {
+        if response.status().is_success() {
+            response
+                .headers_mut()
+                .insert("cache-control", HeaderValue::from_static(header));
+        }
     }
 
     response
@@ -165,6 +194,27 @@ mod tests {
         assert!(!script_src.contains("unsafe-inline"), "script-src must not allow inline");
         assert!(!POLICY.contains("unsafe-eval"), "policy must not allow eval");
         assert!(!POLICY.contains('*'), "policy must not wildcard a source");
+    }
+
+    /// The two cache policies must not trade places. `public` on an admin JSON
+    /// endpoint would hand a shared proxy the operator's data, and the long
+    /// `stale-while-revalidate` that makes static assets cheap would pin stale
+    /// metrics on the dashboard. This asserts the split rather than the strings:
+    /// static is public and long-lived, data is private and short-lived, and a
+    /// path that is neither gets no header at all.
+    #[test]
+    fn static_assets_cache_publicly_and_data_endpoints_never_do() {
+        assert!(STATIC_HEADER.starts_with("public"), "static assets are shareable");
+        assert!(
+            SWR_PATHS.iter().all(|p| !p.starts_with("/static")),
+            "a data path must not be routed to the static policy"
+        );
+        assert!(
+            SWR_HEADER.starts_with("private"),
+            "admin data must never enter a shared cache"
+        );
+        // The static window is the long one — that is the whole point of it.
+        assert!(STATIC_HEADER.contains("max-age=300") && SWR_HEADER.contains("max-age=5"));
     }
 
     /// Every fetch directive the app actually uses is named. A missing one falls

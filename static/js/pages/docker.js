@@ -637,7 +637,13 @@ refreshUpdates();
 loadActionLog();
 
 // The `docker` topic already triggers a refresh on state changes; this is the
-// fallback for stat drift and for when the socket is down.
+// fallback for when the socket is down.
+//
+// The condition used to be `!== 'live' || visibilityState === 'visible'`, which
+// is true for any visible tab — so the fallback poll ran *permanently*, against
+// a live socket, on the app's single most expensive endpoint. Both halves have
+// to hold: poll only when the socket is actually down, and never for a
+// backgrounded tab.
 setInterval(() => {
-  if (live.getState() !== 'live' || document.visibilityState === 'visible') refreshServices();
+  if (live.getState() !== 'live' && document.visibilityState === 'visible') refreshServices();
 }, 15_000);
