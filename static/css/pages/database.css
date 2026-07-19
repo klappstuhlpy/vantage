@@ -1,6 +1,10 @@
 /* Database console — composition only. */
 
 @layer pages {
+  .card {
+    margin-top: 1rem;
+  }
+
   .db-grid {
     display: grid;
     grid-template-columns: minmax(200px, 260px) minmax(0, 1fr);
@@ -20,20 +24,628 @@
     overflow: auto;
   }
 
+  /* =====================================================================
+     Schema tree (P1)
+     ===================================================================== */
+  .db-tree-filter {
+    padding: var(--sp-2);
+    border-bottom: 1px solid var(--line-1);
+  }
+
+  .db-tree-filter .input {
+    width: 100%;
+    font-size: var(--fs-sm);
+  }
+
+  .db-tree {
+    max-height: 56vh;
+    overflow: auto;
+    padding: var(--sp-2) 0;
+  }
+
+  .db-tree-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    padding: var(--sp-2) var(--sp-3) var(--sp-1);
+    font-size: var(--fs-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--ink-3);
+  }
+
+  .db-tree-row {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-1);
+    padding: 2px var(--sp-3) 2px var(--sp-1);
+  }
+
+  .db-tree-row:hover {
+    background: var(--bg-hover);
+  }
+
+  .db-tree-row .table-link {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* The expander: a plain chevron that rotates when open. */
+  .db-tree-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    background: none;
+    border: 0;
+    color: var(--ink-3);
+    cursor: pointer;
+  }
+
+  .db-tree-toggle:hover {
+    color: var(--ink-1);
+  }
+
+  .db-tree-toggle .icon {
+    transition: transform var(--dur-fast);
+  }
+
+  .db-tree-toggle[aria-expanded='true'] .icon {
+    transform: rotate(90deg);
+  }
+
+  .db-tree-kind {
+    font-size: var(--fs-xs);
+    font-style: italic;
+  }
+
+  /* Column rows: indented under their table, one line each. */
+  .db-tree-col {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    padding: 1px var(--sp-3) 1px calc(var(--sp-5) + var(--sp-2));
+    font-size: var(--fs-xs);
+  }
+
+  .db-tree-colname {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .db-tree-type {
+    margin-left: auto;
+    flex-shrink: 0;
+    max-width: 9rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .db-tree-pk {
+    display: inline-flex;
+    color: var(--acc);
+    flex-shrink: 0;
+  }
+
+  .db-tree-pk .icon {
+    width: 12px;
+    height: 12px;
+  }
+
+  .db-tree-glyph-pad {
+    width: 12px;
+    flex-shrink: 0;
+  }
+
+  /* FK marker: link-styled, because it names somewhere you can go. */
+  .db-tree-fk {
+    color: var(--acc);
+    flex-shrink: 0;
+    max-width: 8rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .db-tree-skel {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+    padding: var(--sp-3);
+  }
+
   /* The picker sits above the table list in the same sticky column, so the list
      gets the separating space rather than butting straight onto the card. */
   .db-side-head {
     margin-top: var(--sp-5);
   }
 
-  /* The tab strip and the panel below it are one block. */
-  .db-main .tabs {
-    margin-bottom: var(--sp-5);
+  #query-panel[hidden],
+  #roles-panel[hidden],
+  #table-panel[hidden] {
+    display: none;
   }
 
-  #query-panel[hidden],
-  #roles-panel[hidden] {
-    display: none;
+  /* =====================================================================
+     Tab strip (P2)
+     ===================================================================== */
+  .db-tabstrip {
+    display: flex;
+    align-items: flex-end;
+    gap: var(--sp-1);
+    margin-bottom: var(--sp-4);
+    border-bottom: 1px solid var(--line-1);
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .db-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-2);
+    padding: var(--sp-2) var(--sp-3);
+    background: none;
+    border: 1px solid transparent;
+    border-bottom: 0;
+    border-radius: var(--r-m) var(--r-m) 0 0;
+    color: var(--ink-2);
+    font-size: var(--fs-sm);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .db-tab:hover {
+    background: var(--bg-hover);
+    color: var(--ink-1);
+  }
+
+  .db-tab.active {
+    background: var(--bg-2);
+    border-color: var(--line-1);
+    color: var(--ink-1);
+    /* Sits on the strip's border so the active tab reads as attached. */
+    margin-bottom: -1px;
+  }
+
+  .db-tab-glyph {
+    display: inline-flex;
+    color: var(--ink-3);
+  }
+
+  .db-tab-glyph .icon {
+    width: 13px;
+    height: 13px;
+  }
+
+  .db-tab-x {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px;
+    border-radius: var(--r-s);
+    color: var(--ink-3);
+  }
+
+  .db-tab-x:hover {
+    background: var(--bg-hover);
+    color: var(--ink-1);
+  }
+
+  .db-tab-x .icon {
+    width: 12px;
+    height: 12px;
+  }
+
+  /* =====================================================================
+     Table browser (P2)
+     ===================================================================== */
+  .db-browser-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    padding: var(--sp-2) var(--sp-3);
+    border-bottom: 1px solid var(--line-1);
+  }
+
+  .db-grid-foot {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+  }
+
+  .db-count-btn {
+    font-size: var(--fs-xs);
+    padding: 2px var(--sp-2);
+  }
+
+  /* ── ORDER BY box ──
+     Deliberately small: it states the sort and accepts one, but it is not the
+     primary control (the header is), so it should not read as one. */
+  .db-orderby {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-2);
+    flex: none;
+  }
+
+  .db-orderby-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    color: var(--ink-3);
+    white-space: nowrap;
+  }
+
+  .db-orderby-input {
+    width: 15ch;
+    height: 26px;
+    padding: 0 var(--sp-2);
+    font-size: var(--fs-xs);
+  }
+
+  .db-orderby-input:placeholder-shown {
+    color: var(--ink-3);
+  }
+
+  /* ── Filter chips ── */
+  .db-filterbar {
+    position: relative;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+    min-width: 0;
+  }
+
+  .db-filter-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-1);
+    max-width: 22rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 2px var(--sp-2);
+    font-size: var(--fs-xs);
+    background: var(--acc-soft);
+    border: 1px solid var(--acc-line);
+    border-radius: var(--r-m);
+    color: var(--acc);
+  }
+
+  .db-filter-x {
+    display: inline-flex;
+    padding: 0;
+    background: none;
+    border: 0;
+    color: inherit;
+    cursor: pointer;
+  }
+
+  .db-filter-x .icon {
+    width: 12px;
+    height: 12px;
+  }
+
+  .db-filter-add {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-1);
+    padding: 2px var(--sp-2);
+    font-size: var(--fs-xs);
+    background: none;
+    border: 1px dashed var(--line-ctl);
+    border-radius: var(--r-m);
+    color: var(--ink-3);
+    cursor: pointer;
+  }
+
+  .db-filter-add:hover {
+    color: var(--ink-1);
+    border-color: var(--ink-3);
+  }
+
+  .db-filter-add .icon {
+    width: 12px;
+    height: 12px;
+  }
+
+  .db-filter-pop {
+    position: absolute;
+    top: calc(100% + var(--sp-2));
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+    padding: var(--sp-3);
+    min-width: 220px;
+    box-shadow: var(--shadow-2, 0 8px 24px rgb(0 0 0 / 0.25));
+  }
+
+  /* ── The grid (D7) ── */
+  .dbgrid {
+    outline: none;
+  }
+
+  .dbgrid:focus-visible {
+    outline: 2px solid var(--acc);
+    outline-offset: -2px;
+  }
+
+  .dbgrid-probe {
+    position: absolute;
+    visibility: hidden;
+    white-space: pre;
+  }
+
+  /* Sticky *inside* the scrolling viewport: pinned vertically, but carried
+     along by horizontal scroll so each column stays under its own name.
+     `overflow: hidden` is deliberately absent — it would clip the columns that
+     scroll past the pane's right edge. */
+  .dbgrid-head {
+    display: flex;
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    background: var(--bg-2);
+    border-bottom: 1px solid var(--line-1);
+    min-width: 100%;
+  }
+
+  .dbgrid-hcell {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: var(--sp-1);
+    flex: none;
+    padding: var(--sp-2) var(--sp-2);
+    font-size: var(--fs-xs);
+    color: var(--ink-2);
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .dbgrid-hcell:hover {
+    color: var(--ink-1);
+    background: var(--bg-hover);
+  }
+
+  .dbgrid-hcell.sorted {
+    color: var(--acc);
+  }
+
+  .dbgrid-hlabel {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Three states, one element: the unsorted marker is present but quiet, so
+     the header advertises that it sorts without shouting it on every column. */
+  .dbgrid-sort {
+    font-size: 9px;
+    color: var(--ink-3);
+    opacity: 0.45;
+    transition: opacity var(--dur-fast) ease, color var(--dur-fast) ease;
+  }
+
+  .dbgrid-hcell:hover .dbgrid-sort {
+    opacity: 0.85;
+  }
+
+  .dbgrid-sort.active {
+    color: var(--acc);
+    opacity: 1;
+  }
+
+  .dbgrid-resize {
+    position: absolute;
+    top: 0;
+    right: -3px;
+    width: 7px;
+    height: 100%;
+    cursor: col-resize;
+    z-index: 3;
+  }
+
+  /* The one scroll container: `auto` in both axes, so a table with more
+     columns than fit scrolls sideways here instead of widening the card and
+     pushing the page into a horizontal scrollbar of its own. */
+  .dbgrid-viewport {
+    position: relative;
+    height: 56vh;
+    overflow: auto;
+    overscroll-behavior-x: contain;
+  }
+
+  .dbgrid-spacer {
+    position: relative;
+  }
+
+  .dbgrid-window {
+    position: absolute;
+    top: 0;
+    left: 0;
+    min-width: 100%;
+    will-change: transform;
+  }
+
+  .dbgrid-row {
+    display: flex;
+    min-width: 100%;
+    border-bottom: 1px solid color-mix(in srgb, var(--line-1) 50%, transparent);
+  }
+
+  .dbgrid-row:hover {
+    background: var(--bg-hover);
+  }
+
+  /* ── Row gutter (the DataGrip-style row handle) ──
+     Sticky-left so the row number stays put while a wide table scrolls
+     sideways: knowing *which* row you are reading is the first thing lost
+     otherwise. It sits above the cells but below the header, so the corner
+     (both sticky) wins the overlap. */
+  .dbgrid-gutter {
+    flex: none;
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding: 0 var(--sp-2);
+    font-size: var(--fs-xs);
+    font-variant-numeric: tabular-nums;
+    color: var(--ink-3);
+    background: var(--bg-2);
+    border-right: 1px solid var(--line-1);
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .dbgrid-row:hover .dbgrid-gutter {
+    color: var(--ink-2);
+  }
+
+  .dbgrid-gutter.sel {
+    color: var(--acc);
+    background: color-mix(in srgb, var(--acc) 18%, var(--bg-2));
+  }
+
+  .dbgrid-corner {
+    flex: none;
+    position: sticky;
+    left: 0;
+    z-index: 4;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-2);
+    border-right: 1px solid var(--line-1);
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .dbgrid-corner:hover {
+    background: var(--bg-hover);
+  }
+
+  /* A small square that fills in when everything is selected — the affordance
+     reads as "select all" without spending a checkbox glyph on it. */
+  .dbgrid-corner-mark {
+    width: 9px;
+    height: 9px;
+    border: 1px solid var(--ink-3);
+    border-radius: 2px;
+  }
+
+  .dbgrid-corner:hover .dbgrid-corner-mark {
+    border-color: var(--ink-2);
+  }
+
+  .dbgrid-corner.sel .dbgrid-corner-mark {
+    background: var(--acc);
+    border-color: var(--acc);
+  }
+
+  .dbgrid-cell {
+    flex: none;
+    padding: 0 var(--sp-2);
+    display: flex;
+    align-items: center;
+    font-size: var(--fs-xs);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: default;
+  }
+
+  .dbgrid-cell > * {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Data should be still: selection is a tint, not a motion. */
+  .dbgrid-cell.sel {
+    background: color-mix(in srgb, var(--acc) 14%, transparent);
+  }
+
+  .dbgrid-cell.focus {
+    outline: 1px solid var(--acc);
+    outline-offset: -1px;
+  }
+
+  .dbgrid-cell.null,
+  .dbgrid-cell.empty {
+    color: var(--ink-3);
+    font-style: italic;
+  }
+
+  /* ── Cell peek ── */
+  .db-peek-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgb(0 0 0 / 0.35);
+  }
+
+  .db-peek {
+    width: min(640px, 90vw);
+    max-height: 70vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .db-peek-head {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    padding: var(--sp-3);
+    border-bottom: 1px solid var(--line-1);
+  }
+
+  .db-peek-col {
+    font-weight: 600;
+  }
+
+  .db-peek-meta {
+    font-size: var(--fs-xs);
+  }
+
+  .db-peek-btn {
+    display: inline-flex;
+    padding: var(--sp-1);
+    background: none;
+    border: 0;
+    border-radius: var(--r-s);
+    color: var(--ink-3);
+    cursor: pointer;
+  }
+
+  .db-peek-btn:hover {
+    background: var(--bg-hover);
+    color: var(--ink-1);
+  }
+
+  .db-peek-body {
+    padding: var(--sp-3);
+    overflow: auto;
+  }
+
+  .db-peek-value {
+    margin: 0;
+    font-size: var(--fs-xs);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
 
   /* A table name is a link in behaviour but a button in semantics — it runs a
@@ -60,19 +672,62 @@
   }
 
   /* =====================================================================
-     Query editor
+     Query editor (CM6)
      ===================================================================== */
-  .db-sql {
-    border: 0;
-    border-radius: 0;
-    background: var(--bg-0);
+  .db-editor-wrap {
+    --syn-keyword: #c792ea;
+    --syn-string: #c3e88d;
+    --syn-number: #f78c6c;
+    --syn-comment: var(--ink-3);
+    --syn-type: #82aaff;
+    --syn-func: #82aaff;
+    --syn-operator: var(--ink-2);
+    --syn-bool: #f78c6c;
+
     min-height: 9rem;
-    resize: vertical;
+    max-height: 40vh;
+    overflow: auto;
+    background: var(--bg-0);
   }
 
-  .db-sql:focus {
-    outline: 2px solid var(--acc);
-    outline-offset: -2px;
+  .db-editor-wrap .cm-editor {
+    min-height: 9rem;
+    height: 100%;
+  }
+
+  .db-editor-wrap .cm-editor.cm-focused {
+    outline: none;
+  }
+
+  .db-editor-wrap .cm-lintRange-error {
+    background-image: none;
+    text-decoration: wavy underline var(--down);
+    text-decoration-skip-ink: none;
+    text-underline-offset: 3px;
+  }
+
+  .db-editor-wrap .cm-lint-marker-error {
+    content: '●';
+    color: var(--down);
+  }
+
+  .db-editor-wrap .cm-panel.cm-panel-lint {
+    background: var(--bg-2);
+    border-top: 1px solid var(--line-1);
+  }
+
+  .db-editor-wrap .cm-panel.cm-panel-lint li {
+    color: var(--ink-2);
+  }
+
+  .db-editor-wrap .cm-diagnostic-error {
+    border-left-color: var(--down);
+  }
+
+  .db-editor-wrap .cm-tooltip-lint {
+    background: var(--bg-2);
+    border: 1px solid var(--line-1);
+    color: var(--ink-1);
   }
 
   .db-run-bar {
@@ -146,9 +801,450 @@
     font-size: var(--fs-xs);
   }
 
-  .cell-empty {
+  /* The two invisible values, marked: SQL NULL (a real null on the wire) and
+     the empty string. Same dim italic voice — the word tells them apart. */
+  .cell-empty,
+  .cell-null {
     color: var(--ink-3);
     font-style: italic;
+  }
+
+  /* =====================================================================
+     DDL view (P4)
+     ===================================================================== */
+  .db-ddl-wrap {
+    border-bottom: 1px solid var(--line-1);
+    max-height: 280px;
+    overflow: auto;
+    background: var(--bg-0);
+  }
+
+  .db-ddl-wrap[hidden] {
+    display: none;
+  }
+
+  .db-ddl-code {
+    margin: 0;
+    padding: var(--sp-3);
+    font-size: var(--fs-xs);
+    line-height: 1.6;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--ink-1);
+  }
+
+  /* =====================================================================
+     EXPLAIN panel (P4)
+     ===================================================================== */
+  .db-explain-panel {
+    margin-top: var(--sp-3);
+  }
+
+  .db-explain-panel[hidden] {
+    display: none;
+  }
+
+  .explain-tree {
+    padding: var(--sp-3);
+  }
+
+  .explain-empty {
+    padding: var(--sp-4) var(--sp-3);
+    text-align: center;
+    color: var(--ink-3);
+    font-size: var(--fs-sm);
+  }
+
+  .explain-node {
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+  }
+
+  .explain-row {
+    display: flex;
+    align-items: baseline;
+    gap: var(--sp-2);
+    padding: 2px 0;
+    line-height: 1.6;
+  }
+
+  .explain-arrow {
+    color: var(--acc);
+    font-weight: 600;
+  }
+
+  .explain-dot {
+    color: var(--ink-3);
+  }
+
+  .explain-label {
+    color: var(--ink-1);
+  }
+
+  .explain-detail {
+    color: var(--ink-3);
+    font-size: 10px;
+    margin-left: var(--sp-2);
+  }
+
+  /* =====================================================================
+     ERD panel (P4)
+     ===================================================================== */
+  .db-erd-panel {
+    margin-top: var(--sp-3);
+  }
+
+  .db-erd-panel[hidden] {
+    display: none;
+  }
+
+  .db-erd-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    flex-wrap: wrap;
+    padding: var(--sp-2) var(--sp-3);
+    border-bottom: 1px solid var(--line-1);
+  }
+
+  .db-erd-title {
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--ink-2);
+  }
+
+  /* The legend is what turns the node colours from decoration into a reading
+     of the graph, so it sits with the diagram rather than in a tooltip. */
+  .db-erd-legend {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    flex-wrap: wrap;
+  }
+
+  .db-erd-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-1);
+    font-size: var(--fs-xs);
+    color: var(--ink-3);
+    cursor: help;
+  }
+
+  .db-erd-swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+    border: 1.5px solid var(--ink-3);
+    background: var(--bg-2);
+  }
+
+  /* Must track the role colours in erd.js — same tokens, same meaning. */
+  .db-erd-swatch.hub {
+    border-color: var(--info);
+    background: color-mix(in srgb, var(--info) 22%, var(--bg-2));
+  }
+  .db-erd-swatch.leaf {
+    border-color: var(--acc);
+    background: color-mix(in srgb, var(--acc) 22%, var(--bg-2));
+  }
+  .db-erd-swatch.both {
+    border-color: var(--ok);
+    background: color-mix(in srgb, var(--ok) 22%, var(--bg-2));
+  }
+  .db-erd-swatch.lone {
+    border-style: dashed;
+  }
+
+  .db-erd {
+    height: 440px;
+    min-height: 300px;
+    background:
+      radial-gradient(circle at 1px 1px, var(--line-1) 1px, transparent 0) 0 0 / 22px 22px;
+  }
+
+  .erd-loading,
+  .erd-empty {
+    padding: var(--sp-4) var(--sp-3);
+    text-align: center;
+    color: var(--ink-3);
+    font-size: var(--fs-sm);
+  }
+
+  /* =====================================================================
+     History panel (P3)
+     ===================================================================== */
+  .db-history-panel {
+    margin-top: var(--sp-3);
+    border: 1px solid var(--line-1);
+    border-radius: var(--r-m);
+    background: var(--bg-1);
+    max-height: 320px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .db-history-panel[hidden] {
+    display: none;
+  }
+
+  .hpanel-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--line-1);
+    flex-shrink: 0;
+  }
+
+  .hpanel-tab {
+    flex: 1;
+    padding: var(--sp-2) var(--sp-3);
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    font-size: var(--fs-sm);
+    color: var(--ink-3);
+    cursor: pointer;
+    text-align: center;
+  }
+
+  .hpanel-tab:hover {
+    color: var(--ink-1);
+  }
+
+  .hpanel-tab.active {
+    color: var(--ink-1);
+    border-bottom-color: var(--acc);
+  }
+
+  .hpanel-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--sp-2) 0;
+  }
+
+  .hpanel-empty {
+    padding: var(--sp-4) var(--sp-3);
+    text-align: center;
+    color: var(--ink-3);
+    font-size: var(--fs-sm);
+  }
+
+  .hpanel-item {
+    padding: var(--sp-2) var(--sp-3);
+    cursor: pointer;
+    border-left: 2px solid transparent;
+  }
+
+  .hpanel-item:hover {
+    background: var(--bg-hover);
+    border-left-color: var(--acc);
+  }
+
+  .hpanel-item--error {
+    border-left-color: var(--down);
+  }
+
+  .hpanel-item-sql {
+    font-size: var(--fs-xs);
+    color: var(--ink-1);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .hpanel-item-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-2);
+  }
+
+  .hpanel-item-name {
+    font-size: var(--fs-sm);
+    font-weight: 500;
+    color: var(--ink-1);
+    cursor: pointer;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .hpanel-item-name:hover {
+    color: var(--acc);
+  }
+
+  .hpanel-item-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    margin-top: 2px;
+    font-size: var(--fs-xs);
+    color: var(--ink-3);
+  }
+
+  .hpanel-chip {
+    padding: 0 var(--sp-1);
+    background: var(--bg-2);
+    border-radius: var(--r-s);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .hpanel-delete {
+    opacity: 0;
+    transition: opacity var(--dur-fast);
+    font-size: var(--fs-sm);
+  }
+
+  .hpanel-item:hover .hpanel-delete {
+    opacity: 1;
+  }
+
+  .hpanel-footer {
+    flex-shrink: 0;
+    padding: var(--sp-2) var(--sp-3);
+    border-top: 1px solid var(--line-1);
+  }
+
+  .hpanel-footer[hidden] {
+    display: none;
+  }
+
+  .hpanel-save-row {
+    display: flex;
+    gap: var(--sp-2);
+  }
+
+  .hpanel-save-input {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .hpanel-clear {
+    font-size: var(--fs-xs);
+    color: var(--down);
+  }
+
+  /* =====================================================================
+     Staged editing (P5)
+
+     The colour scheme is the whole point of this section: an operator glancing
+     at the grid has to be able to tell, without reading anything, which cells
+     they have touched and which rows are going away. Amber for edited, green
+     for added, struck-through and faded for deleted — and all three are tints
+     over the existing row, never a replacement for it, so the original value
+     stays legible next to the change.
+     ===================================================================== */
+  .db-edit-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    padding: var(--sp-2) var(--sp-3);
+    border-bottom: 1px solid var(--line-1);
+  }
+
+  .db-staged {
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    color: var(--warn);
+    padding: 2px var(--sp-2);
+    border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--line-1));
+    border-radius: var(--r-s);
+    background: color-mix(in srgb, var(--warn) 10%, transparent);
+  }
+
+  .dbgrid-cell.staged {
+    background: color-mix(in srgb, var(--warn) 18%, transparent);
+    box-shadow: inset 2px 0 0 var(--warn);
+  }
+
+  .dbgrid-row.row-added .dbgrid-cell,
+  .dbgrid-row.row-added .dbgrid-gutter {
+    background: color-mix(in srgb, var(--ok) 12%, transparent);
+  }
+
+  .dbgrid-row.row-deleted .dbgrid-cell {
+    background: color-mix(in srgb, var(--error) 10%, transparent);
+    text-decoration: line-through;
+    color: var(--ink-3);
+  }
+
+  .dbgrid-row.row-deleted .dbgrid-gutter {
+    background: color-mix(in srgb, var(--error) 14%, transparent);
+    color: var(--error);
+  }
+
+  /* The in-place editor fills its cell exactly, so committing does not make the
+     text jump — the value stays where you typed it. */
+  .dbgrid-edit {
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    outline: 1px solid var(--acc);
+    outline-offset: -1px;
+    background: var(--bg-0);
+    color: var(--ink-1);
+    font: inherit;
+    font-size: var(--fs-xs);
+  }
+
+  /* ── Review drawer ──
+     Server-generated: this is what will run, not what the browser guessed. */
+  .db-preview-wrap {
+    border-bottom: 1px solid var(--line-1);
+    background: var(--bg-1);
+  }
+
+  .db-preview-head {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    padding: var(--sp-2) var(--sp-3);
+    font-size: var(--fs-xs);
+    border-bottom: 1px solid var(--line-1);
+  }
+
+  .db-preview-list {
+    margin: 0;
+    padding: var(--sp-2) var(--sp-3) var(--sp-2) var(--sp-5);
+    max-height: 220px;
+    overflow: auto;
+    font-size: var(--fs-xs);
+    line-height: 1.7;
+  }
+
+  .db-preview-item {
+    color: var(--ink-2);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .db-preview-kind {
+    display: inline-block;
+    min-width: 4.5em;
+    margin-right: var(--sp-2);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    color: var(--ink-3);
+  }
+
+  .db-preview-item.delete .db-preview-kind {
+    color: var(--error);
+  }
+
+  .db-preview-item.insert .db-preview-kind {
+    color: var(--ok);
+  }
+
+  .db-preview-item.update .db-preview-kind {
+    color: var(--warn);
   }
 
   @media (max-width: 860px) {

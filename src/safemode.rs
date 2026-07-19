@@ -73,6 +73,12 @@ const DESTRUCTIVE_PREFIXES: &[&str] = &[
     "/docker",
     "/scripts",
     "/backups",
+    // The database console's staged edits (DB Studio P5). Deliberately the
+    // apply path alone, not `/database`: browsing and running a read query are
+    // not host changes, and freezing the whole console would take the tool you
+    // diagnose with along with the tool you break things with. `/database/query`
+    // in danger mode is *not* covered here — see the note in dbadmin/routes.rs.
+    "/database/apply",
 ];
 
 /// Whether a request would change host state, and so must be refused while safe
@@ -223,6 +229,22 @@ mod tests {
         assert!(is_destructive(&Method::DELETE, "/proxy/3"));
         assert!(is_destructive(&Method::POST, "/docker/snapshots/2/restore"));
         assert!(is_destructive(&Method::POST, "/scripts/nightly/run"));
+    }
+
+    /// The database console's split (DB Studio P5): applying staged edits is a
+    /// host change and freezes; browsing, previewing a batch and running a query
+    /// do not. The last one is the deliberate asymmetry documented in
+    /// `dbadmin/routes.rs` — pinned here so changing it has to be a decision.
+    #[test]
+    fn safe_mode_freezes_applying_edits_but_not_the_rest_of_the_console() {
+        assert!(is_destructive(&Method::POST, "/database/apply"));
+
+        assert!(!is_destructive(&Method::POST, "/database/preview"));
+        assert!(!is_destructive(&Method::POST, "/database/query"));
+        assert!(!is_destructive(&Method::GET, "/database/rows"));
+        assert!(!is_destructive(&Method::GET, "/database/apply"));
+        // A lookalike route must not inherit the freeze.
+        assert!(!is_destructive(&Method::POST, "/database/applyfoo"));
     }
 
     #[test]

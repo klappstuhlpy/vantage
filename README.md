@@ -15,12 +15,16 @@ Vantage gives you a single pane of glass over Docker containers, firewall rules,
 - **File sanitizer** — ClamAV + VirusTotal integration for uploaded/suspicious files
 - **Reverse proxy** — config generation for nginx, Caddy, and Cloudflare Tunnels; DNS upserts via Cloudflare API
 - **SSH key management** — authorized_keys CRUD, temporary access tokens, audit log
-- **Database console** — browse and query `admin.db` with a two-layer safety guard (prefilter + `query_only` pragma)
+- **Database console** — browse and query SQLite databases + external PostgreSQL with a two-layer safety guard (prefilter + engine-enforced read-only); schema browser, table paging, CSV export
 - **Backups** — automatic SQLite `VACUUM INTO` with retention + S3-compatible off-site mirroring
 - **Scheduled scripts** — cron-driven operator scripts runnable from the Ctrl+K spotlight palette
 - **Docker image updates** — periodic registry digest comparison with dashboard notifications
 - **Multi-sink alerting** — Discord webhook, ntfy, generic webhook, SMTP email (all optional, fire in parallel)
 - **Security analytics** — request stats, GeoIP lookups, Cloudflare panels, login attempt tracking
+- **Audit log** — every privileged action recorded (who, when, from where, what), time-based retention, refused attempts included
+- **Safe mode** — global kill switch that freezes all destructive host mutations (middleware-enforced)
+- **Revert-timer apply** — firewall/proxy changes auto-roll-back unless confirmed within a timeout window; dry-run diff preview before apply
+- **Security headers** — strict CSP (`'self'` only, no inline/eval), X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy on every response
 - **Live updates** — WebSocket hub with subscribe/unsubscribe protocol for real-time dashboard tiles
 
 ## Security Model
@@ -33,7 +37,9 @@ Vantage is deliberately a remote-root web app and takes an aggressive defensive 
 | Auth        | Argon2 passwords, HMAC-signed `__Host-` cookies (SameSite=Strict, HttpOnly, 12h), TOTP 2FA (ChaCha20-Poly1305 at rest)                                    |
 | Brute-force | Per-IP login lockout (5 failures / 15 min, bounded LRU); constant-time verification even for unknown usernames                                            |
 | Privilege   | All host mutations route through a typed boundary (`kls-agent`) — not raw shell; reads go through bollard/procfs                                          |
-| Database    | WAL-mode SQLite; DB console enforces `PRAGMA query_only`; safe-mode prefilter rejects writes                                                              |
+| Sudo        | Destructive actions require re-authentication within 10 min (`Sudo` extractor); transparent reauth modal + retry in the browser                           |
+| Headers     | Strict CSP (`default-src 'self'`; no inline/eval/wildcard), X-Frame-Options DENY, nosniff, no-referrer — on every response including static assets        |
+| Database    | WAL-mode SQLite; DB console enforces `PRAGMA query_only` / Postgres `READ ONLY`; safe-mode prefilter rejects writes                                       |
 
 An authenticated session can manage containers, firewall rules, SSH keys, and cron
 scripts — it is root on the host by design. Run it in the default `vpn` mode behind a
@@ -105,6 +111,9 @@ All paths may be absolute or relative to the process working directory.
 | `production`                  | bool             | `false`                                       | Production deployment: enables ACME on port 443 and forces `Secure`/`__Host-` cookies.                                                                              |
 | `update_check_interval_hours` | number \| null   | `12`                                          | Hours between background Docker image update checks (registry digest compare). `0` disables. Requires Docker.                                                       |
 | `audit_retention_days`        | number \| null   | `90`                                          | Days of audit-log entries to keep (a hard row cap also applies).                                                                                                    |
+| `csp_report_only`            | bool             | `false`                                       | Send `Content-Security-Policy-Report-Only` instead of enforcing. Use for first-rollout discovery — a wrong policy can lock you out of the only way into the box.    |
+| `sqlite_sources`             | array            | `[]`                                          | Extra SQLite files to expose in the database console (beyond `admin.db` and `requests_db_path`). See [SQLite sources](#sqlite-sources).                             |
+| `postgres_url`               | string \| null   | `null`                                        | PostgreSQL connection URL (`postgres://user:pw@host:5432/db`) for the database console. The role's privileges are the real limit — use the narrowest that's useful. |
 | `alerts`                      | object           | `{}`                                          | Multi-sink alert delivery. All sinks optional; absent = no alerts. See [Alerts](#alerts).                                                                           |
 | `backup`                      | object           | `{}`                                          | SQLite backup settings (retention + off-site mirror). See [Backup](#backup).                                                                                        |
 | `proxy`                       | object           | `{}`                                          | Reverse-proxy config generation. See [Proxy](#proxy).                                                                                                               |
@@ -303,6 +312,23 @@ Cloudflare API credentials (Tunnel API mode + DNS record upserts). All fields op
 }
 ```
 
+#### SQLite sources
+
+Extra SQLite databases exposed in the database console. Each entry's `name` becomes a source
+id (`sqlite:<name>`) — the console resolves it from this catalog, never from the request URL.
+
+| Field  | Type | Required | Description                                                                     |
+|--------|------|----------|---------------------------------------------------------------------------------|
+| `name` | string | yes    | Display name and the lookup key (must not collide with the built-in `admin` or `requests` sources). |
+| `path` | path   | yes    | Path to the `.db` file. Opened fresh per request, read-only unless danger mode is active.           |
+
+```json
+"sqlite_sources": [
+  { "name": "percy", "path": "/var/lib/percy/percy.db" },
+  { "name": "analytics", "path": "/opt/data/analytics.db" }
+]
+```
+
 #### Complete example
 
 A public-mode deployment exercising most fields:
@@ -329,6 +355,11 @@ A public-mode deployment exercising most fields:
   "production": true,
   "update_check_interval_hours": 12,
   "audit_retention_days": 90,
+  "csp_report_only": false,
+  "sqlite_sources": [
+    { "name": "percy", "path": "/var/lib/percy/percy.db" }
+  ],
+  "postgres_url": "postgres://readonly:pw@localhost:5432/app",
   "alerts": {
     "discord_webhook_url": "https://discord.com/api/webhooks/123/abc",
     "email": {
@@ -431,9 +462,9 @@ src/
     storage.rs     -- SQLite persistence
 ```
 
-Feature slices: metrics, docker, firewall, health, secrets, sanitizer, proxy, backup, ssh, certs, security, logs, dbadmin, spotlight, cron, updates, alerts.
+Feature slices: account, audit, metrics, docker, firewall, health, secrets, sanitizer, proxy, backup, ssh, certs, security, logs, dbadmin, spotlight, cron, updates, alerts.
 
-The server-side rendered frontend uses Askama templates (`templates/`) with per-page JS/CSS (`static/`). A shared design system is served from the `kls-ui` crate at `/kls/*`.
+The server-side rendered frontend uses Askama templates (`templates/`) with per-page JS/CSS (`static/`). The UI is fully standalone — no external CDN or runtime dependency; fonts, icons, and chart libraries are vendored under `static/`.
 
 Release history is in [CHANGELOG.md](CHANGELOG.md). Vantage is pre-1.0: the config
 format and the exposure policy may still change between minor versions.

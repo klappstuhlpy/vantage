@@ -24,6 +24,7 @@ const KIND = {
   firewall: { icon: 'brick-wall', group: 'Firewall rules' },
   ssh: { icon: 'key-round', group: 'SSH keys' },
   secret: { icon: 'triangle-alert', group: 'Secret findings' },
+  database: { icon: 'database', group: 'Databases' },
 };
 
 let dialog, input, results, footer;

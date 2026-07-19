@@ -49,38 +49,36 @@
         </div>
 
         <div class="section-head db-side-head">
-            <h2>Tables</h2>
-            <span class="count-badge" id="table-count">0</span>
+            <h2>Schema</h2>
+            <span class="count-badge" id="tree-count">0</span>
         </div>
         <div class="card">
             <div class="card-body flush">
-                <div class="table-wrap">
-                    <table class="table" id="tables">
-                        <thead>
-                            <tr>
-                                <th>Name</th>
-                                <th class="num">Rows</th>
-                            </tr>
-                        </thead>
-                        <tbody id="tables-body"></tbody>
-                    </table>
+                {#
+                    The tree is the navigation, not a decoration: the filter
+                    narrows it in place so a database with a hundred tables
+                    stays usable without a search page of its own. Both this and
+                    the tree body are filled by db/tree.js.
+                #}
+                <div class="db-tree-filter">
+                    <label class="sr-only" for="tree-filter">Filter tables</label>
+                    <input class="input mono" id="tree-filter" type="search"
+                           placeholder="Filter tables…" autocomplete="off" spellcheck="false">
                 </div>
+                <div class="db-tree" id="db-tree"></div>
             </div>
         </div>
     </section>
 
     <section class="db-main">
         {#
-            The Roles tab only exists for Postgres sources — SQLite has no role
-            system — so database.js shows and hides it as the source changes,
-            and it is absent entirely when no instance is configured.
+            Two kinds of tab live in this strip — query tabs (editor + results)
+            and table tabs (the browser grid) — and db/tabs.js owns all of it,
+            including restoring the set from sessionStorage on reload. The strip
+            is empty in the markup on purpose: which tabs exist is client state,
+            not something the server can know.
         #}
-        {% if has_postgres %}
-        <div class="tabs" id="db-tabs" role="tablist">
-            <button type="button" data-value="query" role="tab" aria-selected="true">Query</button>
-            <button type="button" data-value="roles" role="tab" aria-selected="false" id="roles-tab" hidden>Roles</button>
-        </div>
-        {% endif %}
+        <div class="db-tabstrip" id="db-tabstrip" role="tablist"></div>
 
         <div id="query-panel">
             <div class="section-head">
@@ -98,25 +96,58 @@
                     <span class="switch-label">Safe mode</span>
                 </label>
             </div>
-    
+
             <div class="card">
                 <div class="card-body flush">
-                    <label class="sr-only" for="sql">SQL query</label>
-                    <textarea class="textarea mono db-sql" id="sql" spellcheck="false" autocomplete="off"
-                              rows="6">SELECT name FROM sqlite_master WHERE type='table';</textarea>
+                    <div class="db-editor-wrap" id="editor-mount"></div>
                 </div>
-    
+
                 <div class="card-footer db-run-bar">
                     <button class="btn" id="run-btn" type="button">
                         <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#play"/></svg>
                         Run
                     </button>
+                    <button class="btn btn-ghost" id="explain-btn" type="button" title="Show execution plan (EXPLAIN)">
+                        <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#route"/></svg>
+                        Explain
+                    </button>
+                    <button class="btn btn-ghost" id="cancel-btn" type="button" hidden>Cancel</button>
                     <span class="kbd">Ctrl ↵</span>
                     <div class="spacer"></div>
+                    <button class="btn btn-ghost btn-xs" id="erd-btn" type="button" title="Show table relationship diagram">
+                        <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#git-branch"/></svg>
+                    </button>
+                    <button class="btn btn-ghost btn-xs" id="history-btn" type="button" title="Toggle query history panel">
+                        <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#clock"/></svg>
+                    </button>
                     <span class="db-meta" id="meta"></span>
                 </div>
             </div>
-    
+
+            <div class="db-history-panel" id="history-panel" hidden></div>
+
+            <div class="db-explain-panel card" id="explain-panel" hidden>
+                <div class="card-body flush" id="explain-content"></div>
+            </div>
+
+            <div class="db-erd-panel card" id="erd-panel" hidden>
+                <div class="db-erd-bar">
+                    <span class="db-erd-title">Relationships</span>
+                    <div id="erd-legend"></div>
+                    <div class="spacer"></div>
+                    <button class="btn btn-ghost btn-xs" id="erd-fit" type="button" title="Fit the graph to the panel">
+                        <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#maximize"/></svg>
+                        Fit
+                    </button>
+                    <button class="btn btn-ghost btn-xs" id="erd-relayout" type="button" title="Lay the graph out again">
+                        <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#refresh-cw"/></svg>
+                    </button>
+                </div>
+                <div class="card-body flush">
+                    <div class="db-erd" id="erd-mount"></div>
+                </div>
+            </div>
+
             <div class="callout danger" id="danger-banner" hidden>
                 <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#triangle-alert"/></svg>
                 <div class="callout-body">
@@ -128,9 +159,9 @@
                     and nothing here will ask twice.
                 </div>
             </div>
-    
+
             <div id="error"></div>
-    
+
             <div class="card" id="result-card">
                 <div class="card-body flush">
                     <div class="table-wrap db-result-scroll">
@@ -169,10 +200,101 @@
             </div>
         </div>
         {% endif %}
+
+
+
+        <div id="table-panel" hidden>
+            <div class="card">
+                <div class="db-browser-bar">
+                    <div id="filter-bar"></div>
+                    <div class="spacer"></div>
+                    {#
+                        The sort, written out. Clicking a header is the fast
+                        path; this is the one that says what the fast path did,
+                        and lets you type a column instead of hunting for it in
+                        a wide table. It round-trips with the header state —
+                        editing here sorts, sorting there rewrites this.
+                    #}
+                    <label class="db-orderby" title="Sort: a column name, optionally followed by ASC or DESC">
+                        <span class="db-orderby-label">ORDER BY</span>
+                        <input class="input mono db-orderby-input" id="order-by" type="text"
+                               placeholder="none" autocomplete="off" spellcheck="false"
+                               aria-label="Order by">
+                    </label>
+                    <button class="btn" id="table-ddl" type="button" title="Show CREATE statement (DDL)">
+                        <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#code"/></svg>
+                        DDL
+                    </button>
+                    <button class="btn" id="table-refresh" type="button" title="Reload this table">
+                        <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#refresh-cw"/></svg>
+                    </button>
+                    <button class="btn" id="export-csv" type="button" title="Download the filtered rows as CSV">
+                        <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#download"/></svg>
+                        CSV
+                    </button>
+                    <button class="btn" id="export-ndjson" type="button" title="Download the filtered rows as NDJSON">
+                        <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#download"/></svg>
+                        NDJSON
+                    </button>
+                </div>
+                <div id="table-ddl-wrap" class="db-ddl-wrap" hidden>
+                    <pre class="db-ddl-code mono" id="table-ddl-code"></pre>
+                </div>
+                {#
+                    The editing toolbar (P5). Every button here is disabled far
+                    more often than it is enabled — a table without a primary
+                    key cannot be edited at all, and Submit additionally needs
+                    danger mode and a fresh sudo window. They stay visible and
+                    disabled rather than disappearing, with the reason in the
+                    tooltip: a control that vanishes teaches nothing about why.
+                    Nothing on this bar writes anything except Submit.
+                #}
+                <div class="db-edit-bar" id="edit-bar">
+                    <button class="btn" id="edit-add" type="button" disabled title="Add an empty row">
+                        <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#plus"/></svg>
+                    </button>
+                    <button class="btn" id="edit-delete" type="button" disabled title="Delete the selected rows">
+                        <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#minus"/></svg>
+                    </button>
+                    <button class="btn" id="edit-preview" type="button" disabled title="Show the statements these changes would run">
+                        <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#eye"/></svg>
+                    </button>
+                    <button class="btn danger" id="edit-submit" type="button" disabled title="Run the staged changes">
+                        <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#upload"/></svg>
+                        Submit
+                    </button>
+                    <button class="btn" id="edit-discard" type="button" hidden>Discard</button>
+                    <span class="db-staged" id="edit-count" hidden></span>
+                    <div class="spacer"></div>
+                    <span class="db-meta" id="edit-hint"></span>
+                </div>
+                <div id="edit-preview-wrap" class="db-preview-wrap" hidden>
+                    <div class="db-preview-head">
+                        <strong>These statements would run, in this order</strong>
+                        <div class="spacer"></div>
+                        <button class="btn btn-icon" id="edit-preview-close" type="button" aria-label="Close the preview">
+                            <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#x"/></svg>
+                        </button>
+                    </div>
+                    <ol class="db-preview-list mono" id="edit-preview-list"></ol>
+                </div>
+                <div id="table-error"></div>
+                <div class="card-body flush">
+                    <div id="db-grid"></div>
+                </div>
+                <div class="card-footer db-grid-foot">
+                    <span id="grid-range" class="db-meta"></span>
+                    <button class="btn db-count-btn" id="count-exact" type="button" hidden>count exactly</button>
+                    <div class="spacer"></div>
+                    <span id="grid-hint" class="db-meta"></span>
+                </div>
+            </div>
+        </div>
     </section>
 </div>
 {% endblock %}
 
 {% block scripts %}
+<script src="/static/vendor/cytoscape.min.js"></script>
 <script type="module" src="/static/js/pages/database.js"></script>
 {% endblock %}

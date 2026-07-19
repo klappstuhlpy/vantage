@@ -63,6 +63,7 @@ mod docker;
 mod firewall;
 mod geoip;
 mod guard;
+mod headers;
 mod health;
 mod lockout;
 mod logs;
@@ -142,6 +143,9 @@ struct AppState {
     /// arming apply parks a rollback here; a background task fires it unless a
     /// confirm request removes it first (§11.1).
     pub(crate) reverts: revert::Registry,
+    /// In-flight console queries, keyed by client-generated run_id. The cancel
+    /// endpoint looks here, verifies ownership, and fires the handle (D12).
+    pub(crate) run_registry: dbadmin::cancel::RunRegistry,
 }
 
 impl AppState {
@@ -560,12 +564,14 @@ async fn build_state_with(config: Config, path: &Path) -> anyhow::Result<AppStat
         safe_mode,
         settings,
         reverts: revert::Registry::new(),
+        run_registry: dbadmin::cancel::RunRegistry::new(),
     })
 }
 
 /// Builds the router. Split out so a test can assert it composes without route
 /// conflicts (mirrors klappstuhl_me's `full_router_builds`).
 fn build_router(state: AppState) -> Router {
+    let report_only = state.config.csp_report_only;
     Router::new()
         .merge(dashboard::routes())
         .route("/login", get(login_page).post(login_submit))
@@ -613,6 +619,13 @@ fn build_router(state: AppState) -> Router {
         // Parse the Cookie header into a `Vec<Cookie>` extension the `Account`
         // extractor reads. Must wrap the routes (added last = outermost).
         .layer(axum::middleware::from_fn(parse_cookies))
+        // Security headers (CSP et al) on the very outside, so they also reach
+        // static assets and the responses produced by the middleware *below*
+        // this line — safe mode's 423 and the public guard's 403 are exactly the
+        // responses a per-handler approach forgets.
+        .layer(axum::middleware::from_fn(move |req, next| {
+            headers::security_headers(report_only, req, next)
+        }))
         .with_state(state)
 }
 
@@ -1340,7 +1353,7 @@ mod tests {
             .await
             .expect("build state");
         create_admin_account(&state.db, "root", "hunter2!").await.unwrap();
-        let app = build_router(state);
+        let app = build_router(state.clone());
 
         // Logged-out → redirect to /login.
         let res = app.clone().oneshot(get("/database")).await.unwrap();
@@ -1380,10 +1393,408 @@ mod tests {
         let mut req = form_post("/database/query", "sql=DELETE+FROM+account&danger_mode=false");
         req.headers_mut()
             .insert(COOKIE, HeaderValue::from_str(&cookie_pair).unwrap());
-        let res = app.oneshot(req).await.unwrap();
+        let res = app.clone().oneshot(req).await.unwrap();
         assert_eq!(res.status(), StatusCode::FORBIDDEN);
 
+        // The schema explorer sees the migrated schema over the same session…
+        let res = app
+            .clone()
+            .oneshot(get_with_cookie("/database/schema?source=sqlite:admin", &cookie_pair))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let schema = json_body(res).await;
+        let names: Vec<&str> = schema["tables"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        assert!(names.contains(&"account"), "got: {names:?}");
+
+        // …and a table detail resolves columns + PK.
+        let res = app
+            .clone()
+            .oneshot(get_with_cookie(
+                "/database/table?source=sqlite:admin&table=account",
+                &cookie_pair,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let detail = json_body(res).await;
+        assert!(detail["columns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["name"] == "id" && c["pk_ordinal"] == 1));
+
+        // Introspection is audited once per source per session, not per click:
+        // two introspection calls above, one row.
+        let entries = audit::entries(
+            &state.db,
+            audit::Filter {
+                limit: 50,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let reads = entries.iter().filter(|e| e.action == "database.schema.read").count();
+        assert_eq!(reads, 1, "expected exactly one schema-read audit row");
+
         std::fs::remove_file(&db_file).ok();
+    }
+
+    /// The P2 table browser over HTTP: rows page with validated filters, an
+    /// unknown filter column is refused by name, and an export streams CSV and
+    /// lands in the audit log with the row count that actually left.
+    #[tokio::test]
+    async fn the_table_browser_pages_filters_and_exports() {
+        let db_file = std::env::temp_dir().join(format!("vantage-browse-test-{}.db", std::process::id()));
+        std::fs::remove_file(&db_file).ok();
+        let state = build_state_with(Config::test_default(), &db_file)
+            .await
+            .expect("build state");
+        create_admin_account(&state.db, "root", "hunter2!").await.unwrap();
+        let app = build_router(state.clone());
+        let cookie_pair = login_as_root(&app).await;
+
+        // A page of the account table contains the admin we just created.
+        let res = app
+            .clone()
+            .oneshot(get_with_cookie(
+                "/database/rows?source=sqlite:admin&table=account",
+                &cookie_pair,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let page = json_body(res).await;
+        assert_eq!(page["offset"], 0);
+        assert!(page["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r.as_array().unwrap().iter().any(|c| c == "root")));
+
+        // A validated filter narrows it: name = "root" (URL-encoded JSON).
+        let filters = "%5B%7B%22column%22%3A%22name%22%2C%22op%22%3A%22%3D%22%2C%22value%22%3A%22root%22%7D%5D";
+        let res = app
+            .clone()
+            .oneshot(get_with_cookie(
+                &format!("/database/rows?source=sqlite:admin&table=account&filters={filters}"),
+                &cookie_pair,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let page = json_body(res).await;
+        assert_eq!(page["rows"].as_array().unwrap().len(), 1);
+
+        // The count honours the same filters.
+        let res = app
+            .clone()
+            .oneshot(get_with_cookie(
+                &format!("/database/count?source=sqlite:admin&table=account&filters={filters}"),
+                &cookie_pair,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(json_body(res).await["count"], 1);
+
+        // An unknown filter column is a 400 naming the column — never a
+        // silently dropped clause (D5).
+        let bad = "%5B%7B%22column%22%3A%22nope%22%2C%22op%22%3A%22%3D%22%2C%22value%22%3A%221%22%7D%5D";
+        let res = app
+            .clone()
+            .oneshot(get_with_cookie(
+                &format!("/database/rows?source=sqlite:admin&table=account&filters={bad}"),
+                &cookie_pair,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        let err = json_body(res).await;
+        assert!(err["error"].as_str().unwrap().contains("nope"), "got: {err}");
+
+        // The export streams CSV with the attachment headers…
+        let res = app
+            .clone()
+            .oneshot(get_with_cookie(
+                "/database/export?source=sqlite:admin&table=account",
+                &cookie_pair,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(res.headers().get("content-type").unwrap(), "text/csv; charset=utf-8");
+        assert!(res
+            .headers()
+            .get("content-disposition")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("account.csv"));
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        let csv = String::from_utf8_lossy(&body);
+        assert!(csv.lines().count() >= 2, "header + at least one row, got: {csv}");
+        assert!(csv.contains("root"));
+
+        // …and is audited with the row count, recorded by the streaming task
+        // once the body has fully left (hence the short poll).
+        let mut audited = false;
+        for _ in 0..40 {
+            let entries = audit::entries(
+                &state.db,
+                audit::Filter {
+                    limit: 50,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+            if let Some(e) = entries.iter().find(|e| e.action == "database.export") {
+                assert_eq!(e.target.as_deref(), Some("sqlite:admin"));
+                assert_eq!(e.detail["table"], "main.account");
+                assert_eq!(e.detail["rows"], 1);
+                assert!(e.ok);
+                audited = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        assert!(audited, "the export must land in the audit log");
+
+        std::fs::remove_file(&db_file).ok();
+    }
+
+    /// Staged edits (DB Studio P5/D15) end to end against a real SQLite file:
+    /// the gates refuse before anything is written, preview never writes, an
+    /// applied batch actually changes the row, and a stale primary key rolls the
+    /// whole batch back rather than half-applying it.
+    #[tokio::test]
+    async fn staged_edits_are_gated_previewable_transactional_and_audited() {
+        let db_file = std::env::temp_dir().join(format!("vantage-edit-test-{}.db", std::process::id()));
+        std::fs::remove_file(&db_file).ok();
+        let state = build_state_with(Config::test_default(), &db_file)
+            .await
+            .expect("build state");
+        create_admin_account(&state.db, "root", "hunter2!").await.unwrap();
+        let app = build_router(state.clone());
+        let cookie_pair = login_as_root(&app).await;
+        let peer = "203.0.113.77:5555";
+
+        let account_id: i64 = state
+            .db
+            .get_row("SELECT id FROM account WHERE name = ?", ("root".to_string(),), |r| {
+                r.get(0)
+            })
+            .await
+            .unwrap();
+
+        let batch = |changes: &str, danger: bool| {
+            format!(r#"{{"source":"sqlite:admin","table":"account","danger_mode":{danger},"changes":{changes}}}"#)
+        };
+        let rename = format!(r#"[{{"kind":"update","pk":{{"id":"{account_id}"}},"set":{{"name":"renamed"}}}}]"#);
+
+        // ── Gate 1: without danger mode, refused outright.
+        let res = app
+            .clone()
+            .oneshot(json_post_with_cookie(
+                "/database/apply",
+                batch(&rename, false),
+                &cookie_pair,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+        // ── Gate 2: with danger mode but a stale session, the reauth marker.
+        let res = app
+            .clone()
+            .oneshot(json_post_with_cookie(
+                "/database/apply",
+                batch(&rename, true),
+                &cookie_pair,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+        assert_eq!(json_body(res).await["reauth_required"], true);
+
+        // Nothing has been written by either refusal.
+        let name: String = state
+            .db
+            .get_row("SELECT name FROM account WHERE id = ?", (account_id,), |r| r.get(0))
+            .await
+            .unwrap();
+        assert_eq!(name, "root", "a refused batch must not write");
+
+        // ── Preview needs no sudo and writes nothing, but shows the statement
+        // with its values inlined for reading.
+        let res = app
+            .clone()
+            .oneshot(json_post_with_cookie(
+                "/database/preview",
+                batch(&rename, false),
+                &cookie_pair,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let plan = json_body(res).await;
+        let preview = plan["statements"][0]["preview"].as_str().unwrap().to_string();
+        assert!(preview.starts_with("UPDATE"), "got: {preview}");
+        assert!(
+            preview.contains("'renamed'"),
+            "values are inlined for reading: {preview}"
+        );
+        // The parameterised SQL is what runs, and it carries no value.
+        assert!(!plan["statements"][0]["sql"].as_str().unwrap().contains("renamed"));
+
+        let name: String = state
+            .db
+            .get_row("SELECT name FROM account WHERE id = ?", (account_id,), |r| r.get(0))
+            .await
+            .unwrap();
+        assert_eq!(name, "root", "preview must not write");
+
+        // ── Reauth opens the sudo window; the batch then applies for real.
+        let res = app
+            .clone()
+            .oneshot(json_post_from(
+                "/account/reauth",
+                r#"{"password":"hunter2!"}"#,
+                &cookie_pair,
+                peer,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let res = app
+            .clone()
+            .oneshot(json_post_with_cookie(
+                "/database/apply",
+                batch(&rename, true),
+                &cookie_pair,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let report = json_body(res).await;
+        assert_eq!(report["applied"], 1);
+        assert_eq!(report["statements"][0]["affected"], 1);
+
+        let name: String = state
+            .db
+            .get_row("SELECT name FROM account WHERE id = ?", (account_id,), |r| r.get(0))
+            .await
+            .unwrap();
+        assert_eq!(name, "renamed", "the applied batch must actually write");
+
+        // ── A batch whose second statement addresses a row that does not exist
+        // must roll the *first* one back too. This is the whole point of D15.
+        let mixed = format!(
+            r#"[{{"kind":"update","pk":{{"id":"{account_id}"}},"set":{{"name":"first"}}}},
+                {{"kind":"update","pk":{{"id":"999999"}},"set":{{"name":"ghost"}}}}]"#
+        );
+        let res = app
+            .clone()
+            .oneshot(json_post_with_cookie(
+                "/database/apply",
+                batch(&mixed, true),
+                &cookie_pair,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+        let err = json_body(res).await["error"].as_str().unwrap().to_string();
+        assert!(err.contains("affected 0 rows"), "got: {err}");
+        assert!(err.contains("rolled back"), "got: {err}");
+
+        let name: String = state
+            .db
+            .get_row("SELECT name FROM account WHERE id = ?", (account_id,), |r| r.get(0))
+            .await
+            .unwrap();
+        assert_eq!(name, "renamed", "the good statement in a failed batch must not survive");
+
+        // ── A refusal the validator raises is audited as a blocked attempt, and
+        // the successful apply is on the record with its statements.
+        let applied: i64 = state
+            .db
+            .get_row(
+                "SELECT COUNT(*) FROM audit_log WHERE action = ? AND ok = 1",
+                ("database.edit.apply".to_string(),),
+                |r| r.get(0),
+            )
+            .await
+            .unwrap();
+        assert_eq!(applied, 1, "the successful apply is on the record");
+
+        let rolled_back: i64 = state
+            .db
+            .get_row(
+                "SELECT COUNT(*) FROM audit_log WHERE action = ? AND ok = 0",
+                ("database.edit.apply".to_string(),),
+                |r| r.get(0),
+            )
+            .await
+            .unwrap();
+        assert_eq!(rolled_back, 1, "so is the batch that rolled back");
+
+        std::fs::remove_file(&db_file).ok();
+    }
+
+    /// Danger mode is sudo-gated (DB Studio D3): being a signed-in admin is not
+    /// enough to drop the read-only guard. The refusal is the machine-readable
+    /// reauth marker — before the SQL is even looked at — and a fresh reauth
+    /// opens the window. Safe-mode reads never need it.
+    #[tokio::test]
+    async fn danger_mode_queries_demand_a_fresh_reauth() {
+        let state = test_state().await;
+        create_admin_account(&state.db, "root", "hunter2!").await.unwrap();
+        let app = build_router(state);
+        let cookie_pair = login_as_root(&app).await;
+        let peer = "203.0.113.61:5555";
+
+        // Signed in, but not recently re-authenticated.
+        let mut req = form_post("/database/query", "sql=SELECT+1&danger_mode=true");
+        req.headers_mut()
+            .insert(COOKIE, HeaderValue::from_str(&cookie_pair).unwrap());
+        let res = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+        let json = json_body(res).await;
+        assert_eq!(json["reauth_required"], true, "the reauth marker is the API contract");
+
+        // A safe-mode read from the same stale session is untouched.
+        let mut req = form_post("/database/query", "sql=SELECT+1&danger_mode=false");
+        req.headers_mut()
+            .insert(COOKIE, HeaderValue::from_str(&cookie_pair).unwrap());
+        let res = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        // Reauth, and the danger query runs.
+        let res = app
+            .clone()
+            .oneshot(json_post_from(
+                "/account/reauth",
+                r#"{"password":"hunter2!"}"#,
+                &cookie_pair,
+                peer,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        let mut req = form_post("/database/query", "sql=SELECT+1&danger_mode=true");
+        req.headers_mut()
+            .insert(COOKIE, HeaderValue::from_str(&cookie_pair).unwrap());
+        let res = app.oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
     }
 
     /// Safe mode, engaged, turns a destructive host mutation away with 423 at the
@@ -1875,7 +2286,123 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(res.status(), StatusCode::BAD_REQUEST, "source {bad} should be refused");
+
+            // The P1 introspection endpoints resolve through the same catalog.
+            for uri in [
+                format!("/database/schema?source={bad}"),
+                format!("/database/table?source={bad}&table=x"),
+            ] {
+                let res = app.clone().oneshot(get_with_cookie(&uri, &cookie_pair)).await.unwrap();
+                assert_eq!(res.status(), StatusCode::BAD_REQUEST, "{uri} should be refused");
+            }
         }
+    }
+
+    /// The CSP has to be on *every* response, which is why it is a layer rather
+    /// than a handler concern. The three checked here are the ones a
+    /// per-handler approach would each miss for a different reason: a page
+    /// (remembered), a static asset (served by `ServeDir`, no handler of ours),
+    /// and a redirect from an unauthenticated request (produced before any
+    /// handler runs).
+    #[tokio::test]
+    async fn security_headers_reach_every_response_including_assets_and_redirects() {
+        let state = test_state().await;
+        create_admin_account(&state.db, "root", "hunter2!").await.unwrap();
+        let app = build_router(state.clone());
+        let cookie_pair = login_as_root(&app).await;
+
+        for (label, request) in [
+            ("a page", get_with_cookie("/", &cookie_pair)),
+            ("a static asset", HttpRequest::builder().uri("/static/css/base.css").body(Body::empty()).unwrap()),
+            // No cookie: this is refused before it reaches a handler.
+            ("an unauthenticated request", HttpRequest::builder().uri("/").body(Body::empty()).unwrap()),
+        ] {
+            let res = app.clone().oneshot(request).await.unwrap();
+            let headers = res.headers();
+            let csp = headers
+                .get("content-security-policy")
+                .unwrap_or_else(|| panic!("{label} carried no CSP"))
+                .to_str()
+                .unwrap();
+            assert!(csp.contains("default-src 'self'"), "{label} has a weakened CSP: {csp}");
+            assert!(!csp.contains("unsafe-inline"), "{label} allows inline: {csp}");
+            assert_eq!(headers.get("x-frame-options").unwrap(), "DENY", "{label}");
+            assert_eq!(headers.get("x-content-type-options").unwrap(), "nosniff", "{label}");
+        }
+    }
+
+    /// Report-only is the escape hatch for a first rollout, so it has to
+    /// actually swap the header — and must never send both, which would enforce
+    /// the policy while looking like it was only observing.
+    #[tokio::test]
+    async fn report_only_mode_swaps_the_header_rather_than_adding_one() {
+        let mut config = Config::test_default();
+        config.csp_report_only = true;
+        let state = build_state_with(config, std::path::Path::new(":memory:")).await.unwrap();
+        let app = build_router(state);
+
+        let res = app
+            .oneshot(HttpRequest::builder().uri("/login").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert!(
+            res.headers().get("content-security-policy-report-only").is_some(),
+            "report-only mode must send the report-only header"
+        );
+        assert!(
+            res.headers().get("content-security-policy").is_none(),
+            "report-only mode must not also enforce"
+        );
+    }
+
+    /// The command palette offers each configured database as a deep link into
+    /// the console. Two things are pinned: the link carries the *source id* (a
+    /// palette entry that dumped you on the page with the wrong database
+    /// selected would be worse than no entry), and the id is percent-encoded,
+    /// because it lands in a query string and a source name is config text, not
+    /// a known-safe token.
+    #[tokio::test]
+    async fn the_palette_deep_links_to_a_database_source() {
+        let state = test_state().await;
+        create_admin_account(&state.db, "root", "hunter2!").await.unwrap();
+        let app = build_router(state.clone());
+        let cookie_pair = login_as_root(&app).await;
+
+        let res = app
+            .clone()
+            .oneshot(get_with_cookie("/spotlight/search?q=admin", &cookie_pair))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = json_body(res).await;
+        let items = body["items"].as_array().unwrap();
+
+        let db_item = items
+            .iter()
+            .find(|i| i["kind"] == "database")
+            .unwrap_or_else(|| panic!("no database entry in: {items:?}"));
+        assert_eq!(
+            db_item["url"].as_str().unwrap(),
+            "/database?source=sqlite%3Aadmin",
+            "the entry must select the source, and the id must be encoded"
+        );
+
+        // A query matching no source name offers no database entry — the
+        // palette must not list every database for every search.
+        let res = app
+            .clone()
+            .oneshot(get_with_cookie("/spotlight/search?q=zzzznope", &cookie_pair))
+            .await
+            .unwrap();
+        let body = json_body(res).await;
+        assert!(
+            !body["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|i| i["kind"] == "database"),
+            "a non-matching query must not offer database entries"
+        );
     }
 
     /// The secrets dashboard gates to `/login`, renders the page once

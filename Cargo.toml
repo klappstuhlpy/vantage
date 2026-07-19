@@ -1,6 +1,6 @@
 [package]
 name = "vantage"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 license = "AGPL-v3"
 description = "Vantage — a security-first VPS/homelab control plane. Manage your server through a terminal-aesthetic web UI, backed by CLI."
@@ -44,6 +44,10 @@ getrandom = { version = "0.2.12", features = ["std"] }
 hmac = "0.12.1"
 # GeoIP lookups for the security dashboard (reads MaxMind GeoLite2-City.mmdb).
 maxminddb = "0.24"
+# Already in the tree via axum/url; declared directly so spotlight can encode a
+# database source id into a `?source=` deep link rather than hand-rolling the
+# escaping of a value that comes from config.
+percent-encoding = "2.3"
 # rusqlite is pulled transitively by kls-web-core; declared directly (matching its
 # version + bundled feature) so the migrate() signature and the DB init tests can
 # name rusqlite::Connection. Feature unification keeps it one build.

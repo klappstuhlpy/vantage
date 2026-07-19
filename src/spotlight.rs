@@ -196,6 +196,28 @@ async fn search(State(state): State<AppState>, _account: Account, Query(params):
         }
     }
 
+    // Database sources. Sources, not tables: a table list means introspecting
+    // every configured database, which is a privileged read the audit log
+    // records per source — doing that on each palette keystroke would turn a
+    // launcher into a stream of audited schema dumps. The console's own Ctrl+P
+    // jumps to a table, over schema it has already fetched.
+    if let Ok(dbs) = crate::dbadmin::list_databases(&state).await {
+        for info in dbs.iter().filter(|d| contains_ci(&d.name, &q)).take(5) {
+            items.push(SpotlightItem::result(
+                "database",
+                format!("Open {}", info.name),
+                format!("{} database · {}", info.kind, info.size_pretty),
+                // The id is config-derived, but it lands in a query string:
+                // encode it rather than trusting that no source name ever
+                // contains an `&`.
+                format!(
+                    "/database?source={}",
+                    percent_encoding::utf8_percent_encode(&info.id, percent_encoding::NON_ALPHANUMERIC)
+                ),
+            ));
+        }
+    }
+
     // Docker containers
     if let Some(docker) = state.docker() {
         if let Ok(containers) = docker.containers().await {

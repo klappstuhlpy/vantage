@@ -2955,6 +2955,7 @@ dependencies = [
  "kls-web-core",
  "maxminddb",
  "nanoid",
+ "percent-encoding",
  "qrcode",
  "quick_cache",
  "reqwest",

@@ -34,10 +34,15 @@
 //!   names the source.
 //! - Every query is audited, including the ones safe mode refused.
 
+pub mod browse;
+pub mod cancel;
+pub mod edit;
 pub mod postgres;
 pub mod routes;
 mod safety;
+pub mod schema;
 pub mod sqlite;
+pub mod storage;
 
 pub use safety::is_safe_query;
 
@@ -90,7 +95,10 @@ pub struct RoleInfo {
 #[derive(Debug, Serialize)]
 pub struct QueryResult {
     pub columns: Vec<String>,
-    pub rows: Vec<Vec<String>>,
+    /// `None` is SQL NULL — serde emits a real JSON `null`, which is what lets
+    /// the frontend tell it apart from a TEXT value that happens to spell
+    /// "NULL" (D2). Everything else arrives already rendered as text.
+    pub rows: Vec<Vec<Option<String>>>,
     pub row_count: usize,
     pub elapsed_ms: u64,
     /// `true` when we capped the result set at [`ROW_LIMIT`]; the UI shows a
@@ -150,11 +158,87 @@ pub async fn list_databases(state: &AppState) -> anyhow::Result<Vec<DatabaseInfo
     Ok(out)
 }
 
-/// Lists the tables in the database identified by `source`.
-pub async fn list_tables(state: &AppState, source: &str) -> anyhow::Result<Vec<TableInfo>> {
+/// One-call schema tree for the database identified by `source`: tables (with
+/// counts) and views.
+pub async fn schema_overview(state: &AppState, source: &str) -> anyhow::Result<schema::SchemaOverview> {
     match parse_source(source)? {
-        Source::Sqlite(name) => sqlite::list_tables(state, &name).await,
-        Source::Postgres(db) => postgres::list_tables(state, &db).await,
+        Source::Sqlite(name) => sqlite::schema_overview(state, &name).await,
+        Source::Postgres(db) => postgres::schema_overview(state, &db).await,
+    }
+}
+
+/// Full description of one table in the database identified by `source`.
+/// `schema` is Postgres-only; SQLite has a single namespace and ignores it.
+pub async fn table_detail(
+    state: &AppState,
+    source: &str,
+    schema: Option<&str>,
+    table: &str,
+) -> anyhow::Result<schema::TableDetail> {
+    match parse_source(source)? {
+        Source::Sqlite(name) => sqlite::table_detail(state, &name, table).await,
+        Source::Postgres(db) => postgres::table_detail(state, &db, schema.unwrap_or("public"), table).await,
+    }
+}
+
+/// One page of a table's rows under a validated browse plan (P2). The table
+/// identity comes from the *introspected* detail, not the request — by the
+/// time this runs, every identifier in play is introspection output.
+pub async fn browse_rows(
+    state: &AppState,
+    source: &str,
+    detail: &schema::TableDetail,
+    plan: browse::BrowsePlan,
+) -> anyhow::Result<browse::RowsPage> {
+    match parse_source(source)? {
+        Source::Sqlite(name) => sqlite::browse_rows(state, &name, &detail.name, plan).await,
+        Source::Postgres(db) => postgres::browse_rows(state, &db, &detail.schema, &detail.name, plan).await,
+    }
+}
+
+/// Which SQL dialect a source speaks — the only thing the edit planner needs to
+/// know about the backend.
+pub fn dialect_of(source: &str) -> anyhow::Result<edit::Dialect> {
+    Ok(match parse_source(source)? {
+        Source::Sqlite(_) => edit::Dialect::Sqlite,
+        Source::Postgres(_) => edit::Dialect::Postgres,
+    })
+}
+
+/// Applies a validated batch of staged edits (P5). The plan was generated for
+/// *this* source's dialect; the backend only executes and verifies it.
+pub async fn apply_edits(state: &AppState, source: &str, plan: edit::EditPlan) -> anyhow::Result<edit::ApplyReport> {
+    match parse_source(source)? {
+        Source::Sqlite(name) => sqlite::apply(state, &name, plan).await,
+        Source::Postgres(db) => postgres::apply(state, &db, plan).await,
+    }
+}
+
+/// The exact row count under the same filters (D8's "count exactly").
+pub async fn browse_count(
+    state: &AppState,
+    source: &str,
+    detail: &schema::TableDetail,
+    plan: browse::BrowsePlan,
+) -> anyhow::Result<browse::CountResult> {
+    match parse_source(source)? {
+        Source::Sqlite(name) => sqlite::browse_count(state, &name, &detail.name, plan).await,
+        Source::Postgres(db) => postgres::browse_count(state, &db, &detail.schema, &detail.name, plan).await,
+    }
+}
+
+/// Streams the filtered table through `tx` (D13), returning the rows streamed.
+pub async fn export_stream(
+    state: &AppState,
+    source: &str,
+    detail: &schema::TableDetail,
+    plan: browse::BrowsePlan,
+    format: browse::ExportFormat,
+    tx: tokio::sync::mpsc::Sender<Result<String, std::io::Error>>,
+) -> anyhow::Result<u64> {
+    match parse_source(source)? {
+        Source::Sqlite(name) => sqlite::export(state, &name, &detail.name, plan, format, tx).await,
+        Source::Postgres(db) => postgres::export(state, &db, &detail.schema, &detail.name, plan, format, tx).await,
     }
 }
 
@@ -166,11 +250,65 @@ pub async fn list_roles(state: &AppState) -> anyhow::Result<Vec<RoleInfo>> {
 
 /// Runs `sql` against the database identified by `source`. When `safe` is true
 /// the backend enforces read-only execution at the engine level.
-pub async fn run_query(state: &AppState, source: &str, sql: &str, safe: bool) -> anyhow::Result<QueryResult> {
+///
+/// `run_id` and `account_id` enable cancellation (D12): the backend registers
+/// the cancel handle before execution so `POST /database/query/cancel` can
+/// fire it. Both are `Option`/defaulted so internal callers that don't need
+/// cancellation can skip them.
+pub async fn run_query(
+    state: &AppState,
+    source: &str,
+    sql: &str,
+    safe: bool,
+    run_id: Option<&str>,
+    account_id: i64,
+) -> anyhow::Result<QueryResult> {
     match parse_source(source)? {
-        Source::Sqlite(name) => sqlite::run_query(state, &name, sql, safe).await,
-        Source::Postgres(db) => postgres::run_query(state, &db, sql, safe).await,
+        Source::Sqlite(name) => sqlite::run_query(state, &name, sql, safe, run_id, account_id).await,
+        Source::Postgres(db) => postgres::run_query(state, &db, sql, safe, run_id, account_id).await,
     }
+}
+
+// ─── EXPLAIN ────────────────────────────────────────────────────────
+
+/// One node in an EXPLAIN plan tree. Both backends produce a flat list of these;
+/// the frontend assembles the tree via `parent` references.
+#[derive(Debug, Serialize)]
+pub struct ExplainNode {
+    pub id: String,
+    pub parent: Option<String>,
+    pub label: String,
+    /// Extra detail (Postgres: cost/rows/width; SQLite: just the detail text).
+    pub detail: Option<String>,
+}
+
+/// Runs EXPLAIN on the given SQL: `EXPLAIN QUERY PLAN` for SQLite,
+/// `EXPLAIN (FORMAT JSON)` for Postgres. Always safe-mode.
+pub async fn explain_query(state: &AppState, source: &str, sql: &str) -> anyhow::Result<Vec<ExplainNode>> {
+    match parse_source(source)? {
+        Source::Sqlite(name) => sqlite::explain_query(state, &name, sql).await,
+        Source::Postgres(db) => postgres::explain_query(state, &db, sql).await,
+    }
+}
+
+/// Returns the DDL (CREATE statement) for a table. SQLite: verbatim from
+/// `sqlite_master.sql`; Postgres: reconstructed from introspection.
+pub async fn get_ddl(state: &AppState, source: &str, schema: Option<&str>, table: &str) -> anyhow::Result<String> {
+    match parse_source(source)? {
+        Source::Sqlite(name) => sqlite::get_ddl(state, &name, table).await,
+        Source::Postgres(db) => postgres::get_ddl(state, &db, schema.unwrap_or("public"), table).await,
+    }
+}
+
+/// Quotes one SQL identifier part: doubles embedded double-quotes and wraps the
+/// whole part. Both engines this console speaks share the `"…"` doubling rule.
+///
+/// Qualified names must be quoted per-part — `quote_ident(schema)` `.`
+/// `quote_ident(table)` — so a dot *inside* a name can never be read as a
+/// separator. Identifiers should only ever come from introspection output, not
+/// from a request; this helper is defence in depth, not the defence (D6).
+pub fn quote_ident(part: &str) -> String {
+    format!("\"{}\"", part.replace('"', "\"\""))
 }
 
 /// Formats a byte count as a short human string (`"42 MB"`).
@@ -210,6 +348,17 @@ mod tests {
         assert!(parse_source("mysql:foo").is_err());
         assert!(parse_source("sqlite:").is_err());
         assert!(parse_source("pg:").is_err());
+    }
+
+    /// Per-part quoting means neither a quote nor a dot in an identifier can
+    /// change the shape of the SQL it lands in.
+    #[test]
+    fn quote_ident_neutralises_quotes_and_dots() {
+        assert_eq!(quote_ident("account"), "\"account\"");
+        assert_eq!(quote_ident("we\"ird"), "\"we\"\"ird\"");
+        // A dot stays inside the quotes — it is part of the name, not a
+        // schema separator.
+        assert_eq!(quote_ident("a.b"), "\"a.b\"");
     }
 
     #[test]

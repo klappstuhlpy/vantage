@@ -26,7 +26,7 @@ ICONS = [
     "circle-check", "triangle-alert", "circle-x", "circle-dashed", "circle-help",
     "circle-alert", "info", "check", "ban", "shield-check",
     # actions
-    "plus", "pencil", "trash-2", "refresh-cw", "play", "pause", "square",
+    "plus", "minus", "pencil", "trash-2", "refresh-cw", "play", "pause", "square",
     "rotate-ccw", "download", "upload", "search", "x", "copy", "eye", "eye-off",
     "external-link", "filter", "settings", "log-out", "user", "menu",
     "ellipsis", "list-restart", "power",
@@ -42,7 +42,7 @@ ICONS = [
     # misc
     "file-text", "folder", "clock", "calendar", "lock", "lock-open", "zap",
     "git-branch", "inbox", "radar", "globe", "map-pin", "fingerprint",
-    "loader-circle", "corner-down-right", "history", "table",
+    "loader-circle", "corner-down-right", "history", "table", "code", "maximize",
     # alert sinks — one glyph each, so the cards are scannable without reading
     "mail", "message-square", "webhook", "smartphone",
 ]
