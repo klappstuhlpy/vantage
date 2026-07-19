@@ -2329,7 +2329,9 @@ mod tests {
                 .to_str()
                 .unwrap();
             assert!(csp.contains("default-src 'self'"), "{label} has a weakened CSP: {csp}");
-            assert!(!csp.contains("unsafe-inline"), "{label} allows inline: {csp}");
+            // Only `style-src` carries the inline escape (CodeMirror and
+            // Cytoscape inject their own `<style>`); scripts stay strict.
+            assert!(csp.contains("script-src 'self';"), "{label} allows inline script: {csp}");
             assert_eq!(headers.get("x-frame-options").unwrap(), "DENY", "{label}");
             assert_eq!(headers.get("x-content-type-options").unwrap(), "nosniff", "{label}");
         }

@@ -444,6 +444,10 @@
     opacity: 1;
   }
 
+  /* Drag to resize, double-click to autofit. The hit area is deliberately
+     wider than the mark it draws — a 1px target is a target you miss — and the
+     mark itself is always painted, because a resize handle that only exists
+     once you happen to hover the right pixel is a feature nobody finds. */
   .dbgrid-resize {
     position: absolute;
     top: 0;
@@ -452,6 +456,27 @@
     height: 100%;
     cursor: col-resize;
     z-index: 3;
+  }
+
+  .dbgrid-resize::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 3px;
+    width: 1px;
+    height: 100%;
+    background: var(--line-1);
+    /* Grown with `transform`, not `height`: the mark sits inside a sticky
+       header that repaints on every horizontal scroll, and a transitioned
+       layout property there is a relayout per frame. */
+    transform: scaleY(0.6);
+    transition: background var(--dur-fast) ease, transform var(--dur-fast) ease;
+  }
+
+  .dbgrid-resize:hover::after,
+  .dbgrid-resize:active::after {
+    transform: scaleY(1);
+    background: var(--acc);
   }
 
   /* The one scroll container: `auto` in both axes, so a table with more
@@ -1185,6 +1210,10 @@
     min-width: 0;
     padding: 0;
     border: 0;
+    /* The cell it replaces is a square box. The shared input reset rounds every
+       `<input>`, and an `outline` follows the element's `border-radius`, so
+       without this the editor sat as a rounded pill inside a square cell. */
+    border-radius: 0;
     outline: 1px solid var(--acc);
     outline-offset: -1px;
     background: var(--bg-0);

@@ -13,10 +13,20 @@
 //! * **`script-src 'self'`** — every script is a module file under `/static`.
 //!   Even the anti-FOUC theme bootstrap, which is the one snippet almost every
 //!   app inlines, is a real file (`core/theme-init.js`).
-//! * **`style-src 'self'`** — no `<style>` blocks and no `style=` attributes in
-//!   markup. Styling done *from JavaScript* goes through the CSSOM
-//!   (`el.style.setProperty`, see `ui.js`'s `applyStyle`), which CSP does not
-//!   govern, so the dynamic column widths and accent swatches keep working.
+//! * **`style-src 'self' 'unsafe-inline'`** — our own markup still carries no
+//!   `<style>` block and no `style=` attribute, and styling done *from
+//!   JavaScript* goes through the CSSOM (`el.style.setProperty`, see `ui.js`'s
+//!   `applyStyle`), which CSP does not govern. The escape hatch is for the two
+//!   vendored libraries that ship their CSS *inside* the JS and inject it as a
+//!   `<style>` element at runtime: CodeMirror 6 (via `style-mod`, the database
+//!   console's SQL editor) and Cytoscape (the container/schema graphs). Under a
+//!   strict `style-src` both render unstyled — a blank editor and an unusable
+//!   graph. Their sheets are generated per instance, so there is no stable hash
+//!   to pin, and a nonce cannot reach a `<style>` element the library creates
+//!   itself. `script-src` stays strict, which is the half of the policy that
+//!   stops code execution; inline *style* buys an attacker who can already
+//!   inject markup very little here, with no remote `img-src`/`font-src` sink
+//!   to exfiltrate to.
 //! * **`object-src 'none'`, `base-uri 'none'`** — nothing embeds plugins, and
 //!   nothing sets a `<base>`; both are pure attack surface here.
 //! * **`frame-ancestors 'none'`** — a control plane for a host has no business
@@ -49,7 +59,7 @@ use axum::{extract::Request, http::HeaderValue, middleware::Next, response::Resp
 /// by something attacker-controlled.
 const POLICY: &str = "default-src 'self'; \
      script-src 'self'; \
-     style-src 'self'; \
+     style-src 'self' 'unsafe-inline'; \
      img-src 'self'; \
      font-src 'self'; \
      connect-src 'self'; \
@@ -139,14 +149,20 @@ pub async fn cache_control(request: Request, next: Next) -> Response {
 mod tests {
     use super::*;
 
-    /// The policy must not contain the two escapes that would make it
-    /// decorative. This is the test that fails when someone reaches for
-    /// `'unsafe-inline'` to make one stubborn snippet work — at which point the
-    /// snippet should move to a file instead, which is what the whole frontend
-    /// already does.
+    /// `script-src` must not contain the escapes that would make it decorative.
+    /// This is the test that fails when someone reaches for `'unsafe-inline'` to
+    /// make one stubborn snippet work — at which point the snippet should move
+    /// to a file instead, which is what the whole frontend already does.
+    /// `style-src` is exempt by design (see the module docs: CodeMirror and
+    /// Cytoscape inject their own `<style>` elements).
     #[test]
     fn the_policy_permits_no_inline_or_eval_escape_hatch() {
-        assert!(!POLICY.contains("unsafe-inline"), "policy must not allow inline");
+        let script_src = POLICY
+            .split(';')
+            .map(str::trim)
+            .find(|d| d.starts_with("script-src"))
+            .expect("policy must name script-src");
+        assert!(!script_src.contains("unsafe-inline"), "script-src must not allow inline");
         assert!(!POLICY.contains("unsafe-eval"), "policy must not allow eval");
         assert!(!POLICY.contains('*'), "policy must not wildcard a source");
     }
@@ -159,7 +175,7 @@ mod tests {
         for directive in [
             "default-src 'self'",
             "script-src 'self'",
-            "style-src 'self'",
+            "style-src 'self' 'unsafe-inline'",
             "connect-src 'self'",
             "frame-ancestors 'none'",
             "base-uri 'none'",

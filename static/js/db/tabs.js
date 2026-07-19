@@ -27,11 +27,17 @@ export function initTabs({ strip, hasRoles, onShow, onClose }) {
 
   const tableId = (t) => `table:${t.source}|${t.schema}|${t.name}`;
 
+  /* The tabs a user can actually see. Everything that picks a tab on the
+   * operator's behalf — closing one, restoring the session — goes through this
+   * rather than `tabs`, because the roles tab stays in the array while hidden
+   * (SQLite has no roles) and handing focus to it painted the roles panel with
+   * no tab lit anywhere in the strip. */
+  const visible = () => tabs.filter((t) => t.kind !== 'roles' || rolesVisible);
+
   function paint() {
     render(
       strip,
-      ...tabs
-        .filter((t) => t.kind !== 'roles' || rolesVisible)
+      ...visible()
         .map((t) =>
           h(
             'button',
@@ -68,7 +74,7 @@ export function initTabs({ strip, hasRoles, onShow, onClose }) {
   }
 
   function activate(id) {
-    const tab = tabs.find((t) => t.id === id);
+    const tab = visible().find((t) => t.id === id);
     if (!tab) return;
     activeId = id;
     paint();
@@ -82,9 +88,11 @@ export function initTabs({ strip, hasRoles, onShow, onClose }) {
     const [closed] = tabs.splice(i, 1);
     onClose?.(closed);
     if (activeId === id) {
-      // The neighbour to the left inherits focus; the query tab is the floor.
-      const next = tabs[Math.max(0, i - 1)];
-      activate(next.id);
+      // The visible neighbour to the left inherits focus; the query tab is the
+      // floor. Indexing `tabs` directly landed on the hidden roles tab, which
+      // is one place left of the first table tab on a SQLite source.
+      const left = visible().filter((t) => tabs.indexOf(t) < i);
+      activate((left.pop() || visible()[0]).id);
     } else {
       paint();
       persist();
@@ -136,7 +144,7 @@ export function initTabs({ strip, hasRoles, onShow, onClose }) {
         const id = tableId(t);
         if (!tabs.some((x) => x.id === id)) tabs.push({ id, kind: 'table', label: t.name, ...t });
       }
-      const wanted = saved.active && tabs.find((t) => t.id === saved.active) ? saved.active : activeId;
+      const wanted = saved.active && visible().some((t) => t.id === saved.active) ? saved.active : activeId;
       activate(wanted);
     },
 

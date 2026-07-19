@@ -8,6 +8,19 @@ as interpreted for an operator-facing control plane: MAJOR for a breaking change
 to the config file or a removed feature, MINOR for a new capability, PATCH for
 fixes and polish.
 
+## [Unreleased]
+
+### Changed
+
+- **The Content-Security-Policy now allows inline styles.** `style-src` is `'self' 'unsafe-inline'`; `script-src` stays strict. The two vendored libraries that ship their CSS *inside* their JavaScript — CodeMirror 6 and Cytoscape — build a `<style>` element at runtime, which the old policy blocked. Their sheets are generated per instance, so there is no stable hash to pin and a nonce cannot reach a `<style>` a library creates itself. Vantage's own markup still carries no `<style>` block and no `style=` attribute.
+
+### Fixed
+
+- **The SQL editor and the graphs rendered unstyled.** Under the strict `style-src` shipped in 0.4.0, CodeMirror 6 lost its entire stylesheet — a blank, unusable editor on `/database` — and the container and ER diagrams lost theirs with it. Both render correctly again.
+- **Column resize handles are now visible.** Grid columns have always been draggable at their right edge (and double-clickable to autofit), but the handle drew nothing, so there was no target to aim at. Each column edge now shows a divider that lights up as you approach it.
+- **The cell editor is square.** Double-clicking a cell in the table browser opened a rounded input inside a square cell; it now traces the cell box exactly.
+- **Closing a table tab no longer lands on the hidden Roles tab.** On a SQLite source — which has no roles — closing the leftmost table tab handed focus to the Roles panel, leaving the roles list on screen with no tab selected anywhere in the strip. A hidden tab can no longer take focus; closing falls back to the query tab as it should.
+
 ## [0.4.1] - 2026-07-19
 
 ### Added
