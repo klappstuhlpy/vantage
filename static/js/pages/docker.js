@@ -146,6 +146,33 @@ const DESTRUCTIVE = {
   }),
 };
 
+const ACTION_LABELS = {
+  start: 'Starting',
+  stop: 'Stopping',
+  restart: 'Restarting',
+  pull: 'Pulling',
+  recreate: 'Recreating',
+};
+
+function setBusy(card, action) {
+  card.classList.add('is-busy');
+  for (const b of card.querySelectorAll('[data-action], [data-role="more"]')) b.disabled = true;
+  let badge = card.querySelector('[data-role="busy"]');
+  if (!badge) {
+    badge = h('span', { class: 'pill busy', dataset: { role: 'busy' } });
+    card.querySelector('.card-header').append(badge);
+  }
+  badge.textContent = `${ACTION_LABELS[action] || action}…`;
+  badge.hidden = false;
+}
+
+function clearBusy(card) {
+  card.classList.remove('is-busy');
+  for (const b of card.querySelectorAll('[data-action], [data-role="more"]')) b.disabled = false;
+  const badge = card.querySelector('[data-role="busy"]');
+  if (badge) badge.hidden = true;
+}
+
 async function runAction(btn, name, action) {
   const warn = DESTRUCTIVE[action];
   if (warn) {
@@ -153,17 +180,18 @@ async function runAction(btn, name, action) {
     if (!(await confirm({ title, message, confirmLabel: action === 'stop' ? 'Stop' : 'Recreate', danger: true }))) return;
   }
 
+  const card = cardFor(name);
   setLoading(btn, true);
+  if (card) setBusy(card, action);
   try {
     const res = await postUrlEncoded('/docker/action', { name, action });
     toast('ok', `${name}: ${action} done`, res.output?.trim()?.split('\n').slice(-1)[0] || undefined);
   } catch (e) {
-    // The handler returns 500 with {ok:false, output} on a failed action — the
-    // output is the whole point, so surface it rather than a generic message.
     const out = e.body?.output?.trim();
     reportError(out ? Object.assign(e, { message: out.split('\n').slice(-3).join('\n') }) : e, `${name}: ${action} failed`);
   } finally {
     setLoading(btn, false);
+    if (card) clearBusy(card);
     await Promise.all([refreshServices(), loadActionLog()]);
   }
 }

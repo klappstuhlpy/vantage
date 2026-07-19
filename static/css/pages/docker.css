@@ -61,6 +61,23 @@
     gap: var(--sp-2);
   }
 
+  /* In-progress action indicator on a card */
+  .service-card.is-busy {
+    opacity: 0.8;
+    pointer-events: none;
+  }
+
+  .pill.busy {
+    background: var(--acc);
+    color: var(--bg-1);
+    animation: pulse-busy 1.2s ease-in-out infinite;
+  }
+
+  @keyframes pulse-busy {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+  }
+
   /* =====================================================================
      Action log
      ===================================================================== */

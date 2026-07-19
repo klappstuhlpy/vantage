@@ -8,6 +8,12 @@ as interpreted for an operator-facing control plane: MAJOR for a breaking change
 to the config file or a removed feature, MINOR for a new capability, PATCH for
 fixes and polish.
 
+## [0.4.1] - 2026-07-19
+
+### Added
+
+- **Docker actions now show a card-level in-progress indicator.** Starting, stopping, pulling or recreating a container dims the card, disables its buttons, and shows a pulsing pill (e.g. "Pulling…") in the header so you can tell at a glance which service is busy — rather than only noticing after the action log updates.
+
 ## [0.4.0] - 2026-07-19
 
 ### Added
