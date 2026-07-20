@@ -10,6 +10,8 @@ fixes and polish.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-20
+
 ### Added
 
 - **Vantage now tells you when a new version is out.** It checks the project's releases on the same schedule as the container image checks, shows the new version and its release notes on the settings page, and sends an alert to your configured sinks the first time a release appears. It uses the existing update-check interval, so setting that to 0 turns both off.
