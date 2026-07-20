@@ -315,12 +315,24 @@ async fn run() -> anyhow::Result<()> {
     let config = Config::load()?;
     let state = build_state(config).await?;
 
-    // A tiny hand-rolled CLI (no clap dependency): the only non-default verb so
-    // far is `admin`, which bootstraps the first host-admin account — mirroring
-    // the monolith's `cargo run -- admin`.
+    // A tiny hand-rolled CLI (no clap dependency): `admin` bootstraps the first
+    // host-admin account — mirroring the monolith's `cargo run -- admin` — and
+    // `apply-update` is an internal step of the self-update flow, not an
+    // operator-facing verb (see below).
     match std::env::args().nth(1).as_deref() {
         None | Some("run") => run_server(state).await,
         Some("admin") => bootstrap_admin(&state).await,
+        // Runs inside the one-shot helper container that replaces a running
+        // Vantage, never in the server itself. Left out of the error message
+        // below deliberately: it is not something an operator invokes by hand,
+        // and advertising it invites exactly that.
+        Some("apply-update") => {
+            let args: Vec<String> = std::env::args().collect();
+            let (Some(dir), Some(service)) = (args.get(2), args.get(3)) else {
+                anyhow::bail!("apply-update requires <project_dir> <service>");
+            };
+            selfupdate::helper::run(dir, service).await
+        }
         Some(other) => Err(anyhow::anyhow!("unknown command {other:?} (expected `run` or `admin`)")),
     }
 }
@@ -605,6 +617,7 @@ fn build_router(state: AppState) -> Router {
         .merge(ssh::routes::routes())
         .merge(proxy::routes::routes())
         .merge(spotlight::routes())
+        .merge(selfupdate::routes::routes())
         .merge(security::routes())
         .merge(safemode::routes())
         .merge(settings::routes())

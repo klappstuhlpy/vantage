@@ -191,7 +191,10 @@ mod tests {
             .map(str::trim)
             .find(|d| d.starts_with("script-src"))
             .expect("policy must name script-src");
-        assert!(!script_src.contains("unsafe-inline"), "script-src must not allow inline");
+        assert!(
+            !script_src.contains("unsafe-inline"),
+            "script-src must not allow inline"
+        );
         assert!(!POLICY.contains("unsafe-eval"), "policy must not allow eval");
         assert!(!POLICY.contains('*'), "policy must not wildcard a source");
     }

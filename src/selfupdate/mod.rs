@@ -16,6 +16,21 @@ use time::OffsetDateTime;
 
 use crate::AppState;
 
+pub mod helper;
+pub mod routes;
+
+/// Where and what to recreate: the Compose project on disk, the service within
+/// it, and the container Vantage is currently running as.
+///
+/// Lives here rather than in `routes` because both `routes` (which produces it)
+/// and `helper` (which consumes it) need it.
+#[derive(Debug, Clone)]
+pub struct Deployment {
+    pub project_dir: String,
+    pub service: String,
+    pub container: String,
+}
+
 /// Where releases are read from. **Compile-time constants, deliberately not
 /// configuration**: an update checker whose source can be repointed over HTTP
 /// is a one-request supply-chain attack. Same rule as alert sink URLs,
