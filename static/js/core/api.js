@@ -203,7 +203,14 @@ export async function request(url, opts = {}) {
  * @param {{ swr?: boolean, onRefresh?: (data: any) => void } & RequestInit} [opts]
  */
 export function get(url, opts = {}) {
-  const { swr, onRefresh, ...rest } = opts;
+  // `cache: 'no-store'` is load-bearing. The data endpoints carry
+  // `max-age=5, stale-while-revalidate=30` (see src/headers.rs), so the reload
+  // a page fires straight after a mutation was answered out of the browser
+  // cache with the pre-mutation body — a dismissed secrets finding stayed on
+  // screen until a hard refresh. Freshness for these is this module's job (the
+  // SWR layer above), not the HTTP cache's. Callers can still override.
+  const { swr, onRefresh, cache = 'no-store', ...rest } = opts;
+  rest.cache = cache;
 
   if (swr) {
     const cached = swrRead(url);

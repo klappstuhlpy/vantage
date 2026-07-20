@@ -294,11 +294,16 @@ export function createGrid(root, opts = {}) {
         class: `dbgrid-gutter mono${rowSelected ? ' sel' : ''}`,
         role: 'rowheader',
         style: { width: `${gutterWidth()}px` },
-        title: 'Click to select the row, shift-click to extend',
+        title: 'Click to select the row, click again to deselect, shift-click to extend',
         onmousedown: (e) => {
           root.focus();
           e.preventDefault();
           if (e.shiftKey && sel) selectRows(sel.anchor.r, r);
+          // Clicking the gutter of the only selected row clears it, the same way
+          // the corner un-selects all. Without this a whole-row selection could
+          // be moved but never dropped, so `−` stayed armed on a row you had
+          // stopped meaning to touch.
+          else if (rowSelected && rect.r0 === r && rect.r1 === r) sel = null;
           else selectRows(r, r);
           paint(true);
           opts.onSelectionChange?.();

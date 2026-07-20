@@ -10,6 +10,13 @@ fixes and polish.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-07-20
+
+### Fixed
+
+- **Dismissing a secrets finding updates the list right away.** The row stayed on screen until a hard refresh: the reload a page fires straight after a change was answered out of the browser's cache with the pre-change body. Data endpoints carry a short cache window, so any page that reloads immediately after a mutation could show stale rows — those fetches now bypass the browser cache.
+- **A selected row in the database console can be un-selected.** Clicking a row's number selected it, and clicking the same number again only re-selected it, so a single-row selection could be moved but never dropped and the delete button stayed armed on a row you had stopped meaning to touch. Clicking the number of the only selected row now clears the selection, the way the corner already cleared a select-all.
+
 ## [0.5.0] - 2026-07-20
 
 ### Added
@@ -199,7 +206,9 @@ fixes and polish.
 - Repeated failed logins from the same address are throttled independently of any firewall configuration, and login timing does not reveal whether a username exists.
 - Changes to the host are made through a typed, audited boundary rather than by shelling out.
 
-[Unreleased]: https://github.com/klappstuhlpy/vantage/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/klappstuhlpy/vantage/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/klappstuhlpy/vantage/compare/v0.5.0...v0.5.1
+[0.5.0]: https://github.com/klappstuhlpy/vantage/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/klappstuhlpy/vantage/compare/v0.4.1...0.4.2
 [0.4.1]: https://github.com/klappstuhlpy/vantage/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/klappstuhlpy/vantage/compare/v0.3.0...v0.4.0

@@ -1,6 +1,6 @@
 [package]
 name = "vantage"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 license = "AGPL-v3"
 description = "Vantage — a security-first VPS/homelab control plane. Manage your server through a terminal-aesthetic web UI, backed by CLI."

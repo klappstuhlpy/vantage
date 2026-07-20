@@ -367,7 +367,7 @@ A public-mode deployment exercising most fields:
   "sqlite_sources": [
     { "name": "percy", "path": "/var/lib/percy/percy.db" }
   ],
-  "postgres_url": "postgres://readonly:pw@localhost:5432/app",
+  "postgres_url": "postgres://user:password@localhost:5432",
   "alerts": {
     "discord_webhook_url": "https://discord.com/api/webhooks/123/abc",
     "email": {
