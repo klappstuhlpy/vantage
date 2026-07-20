@@ -17,8 +17,8 @@ description = "Vantage — a security-first VPS/homelab control plane. Manage yo
 # in `static/` (see static/README.md). The site and the Percy dashboard still use
 # kls-ui; Vantage diverged so it can be a standalone product with its own look.
 [dependencies]
-kls-web-core = { git = "https://github.com/klappstuhlpy/kls-core", tag = "v0.1.0" }
-kls-agent = { git = "https://github.com/klappstuhlpy/kls-core", tag = "v0.1.0" }
+kls-web-core = { git = "https://github.com/klappstuhlpy/kls-core", tag = "v0.2.0" }
+kls-agent = { git = "https://github.com/klappstuhlpy/kls-core", tag = "v0.2.0" }
 anyhow = "1.0.80"
 argon2 = { version = "0.5.3", features = ["std"] }
 # Compile-time HTML templates for admin pages (own `templates/` dir). Askama

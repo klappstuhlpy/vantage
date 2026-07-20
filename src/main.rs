@@ -64,6 +64,7 @@ mod cron;
 mod dashboard;
 mod dbadmin;
 mod diffutil;
+mod disk;
 mod docker;
 mod firewall;
 mod geoip;
@@ -617,6 +618,7 @@ fn build_router(state: AppState) -> Router {
         .merge(backup::routes::routes())
         .merge(ssh::routes::routes())
         .merge(systemd::routes())
+        .merge(disk::routes())
         .merge(proxy::routes::routes())
         .merge(spotlight::routes())
         .merge(selfupdate::routes::routes())

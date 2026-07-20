@@ -84,6 +84,10 @@
                     <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#activity"/></svg>
                     <span class="nav-item-label">Metrics</span>
                 </a>
+                <a href="/disk" class="nav-item" data-page="disk"{% if active_page == "disk" %} aria-current="page"{% endif %}>
+                    <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#hard-drive"/></svg>
+                    <span class="nav-item-label">Disk</span>
+                </a>
                 <a href="/monitors" class="nav-item" data-page="health"{% if active_page == "health" %} aria-current="page"{% endif %}>
                     <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#heart-pulse"/></svg>
                     <span class="nav-item-label">Health</span>

@@ -229,6 +229,26 @@ pub struct Config {
     /// default; scripts without a `schedule` are only runnable on demand.
     #[serde(default)]
     pub spotlight_scripts: Vec<SpotlightScript>,
+    /// systemd units the `/systemd` page may show and control. Empty by default,
+    /// which renders an empty page and makes every action route a 404.
+    ///
+    /// This list *is* the security boundary for that page: a route resolves the
+    /// unit named in a request by looking it up here, so an unlisted unit has no
+    /// representation and cannot be started, stopped, or restarted over HTTP.
+    /// Listing `vantage` itself is allowed, but means an operator can stop the
+    /// thing serving the button.
+    #[serde(default)]
+    pub systemd_units: Vec<String>,
+    /// Directories the `/disk` page measures with `du`. Empty by default, which
+    /// leaves the directory-sizes card empty and explaining itself.
+    ///
+    /// Same boundary as [`Self::systemd_units`]: a path only reaches `du` because
+    /// it is *named here*, never because a request carried it. There is no route
+    /// that accepts a path, so nothing to point at `/etc` or `/`. The all-mounts
+    /// table beside it needs no allowlist — `df` takes no path and reveals no
+    /// contents.
+    #[serde(default)]
+    pub disk_paths: Vec<String>,
     /// Public base URL the admin app is served from (absolute asset/redirect URLs).
     /// No trailing slash. In `vpn` mode this is the tunnel address.
     #[serde(default = "default_base_url")]
@@ -711,6 +731,8 @@ impl Config {
             firewall_backend: None,
             secret_scan_paths: Vec::new(),
             spotlight_scripts: Vec::new(),
+            systemd_units: Vec::new(),
+            disk_paths: Vec::new(),
             base_url: default_base_url(),
             domains: Vec::new(),
             production: false,
@@ -759,6 +781,8 @@ impl Config {
             firewall_backend: None,
             secret_scan_paths: Vec::new(),
             spotlight_scripts: Vec::new(),
+            systemd_units: Vec::new(),
+            disk_paths: Vec::new(),
             base_url: "http://localhost".to_string(),
             domains: Vec::new(),
             production: false,
