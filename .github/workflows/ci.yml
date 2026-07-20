@@ -14,6 +14,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # .cargo/config.toml points the linux target at mold, so every Linux
+      # consumer of this repo needs it on PATH — the Dockerfile installs it for
+      # the same reason. Without it the link step dies with
+      # "collect2: fatal error: cannot find 'ld'" before any crate finishes.
+      - name: Install mold
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mold
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
