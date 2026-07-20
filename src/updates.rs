@@ -350,6 +350,19 @@ pub async fn check_service(state: &AppState, service: &ServiceConfig) -> ImageUp
     }
 }
 
+/// Re-checks one configured service's image on demand, updating just its stored
+/// entry. Returns the fresh result, or `None` if no service by that name is
+/// configured. Unlike [`run_check`], this fires no alert — the operator is
+/// looking at the screen that asked for it.
+pub async fn check_one(state: &AppState, service_name: &str) -> Option<ImageUpdate> {
+    let service = state.config.services.iter().find(|s| s.name == service_name)?.clone();
+    let update = check_service(state, &service).await;
+    if let Ok(mut guard) = store().lock() {
+        guard.insert(update.service.clone(), update.clone());
+    }
+    Some(update)
+}
+
 /// Runs a check across every configured service, stores the result, and fires
 /// an alert for any image that went from "no update" to "update available"
 /// since the previous run.

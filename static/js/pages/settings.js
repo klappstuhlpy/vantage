@@ -39,6 +39,18 @@ document.getElementById('apply-update-btn')?.addEventListener('click', async (e)
   }
 });
 
+/* Force a self-update check now, then reload so the card re-renders from the
+ * fresh status (up-to-date vs. an "Update now" button). */
+document.getElementById('check-update-btn')?.addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  try {
+    await withLoading(btn, () => post('/updates/self/check'), { errorTitle: "Couldn't check for updates" });
+    location.reload();
+  } catch {
+    /* withLoading already surfaced the error toast */
+  }
+});
+
 form?.addEventListener('submit', async (e) => {
   e.preventDefault();
   const body = {

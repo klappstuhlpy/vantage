@@ -35,7 +35,7 @@ use axum::{
     extract::{ConnectInfo, State},
     http::{header::SET_COOKIE, HeaderValue, StatusCode},
     response::{Html, IntoResponse, Redirect, Response},
-    routing::get,
+    routing::{get, post},
     Extension, Form, Json, Router,
 };
 use cookie::Cookie;
@@ -85,6 +85,7 @@ mod session;
 mod settings;
 mod spotlight;
 mod ssh;
+mod systemd;
 mod totp;
 mod updates;
 mod ws;
@@ -615,6 +616,7 @@ fn build_router(state: AppState) -> Router {
         .merge(certs::routes())
         .merge(backup::routes::routes())
         .merge(ssh::routes::routes())
+        .merge(systemd::routes())
         .merge(proxy::routes::routes())
         .merge(spotlight::routes())
         .merge(selfupdate::routes::routes())
@@ -623,6 +625,7 @@ fn build_router(state: AppState) -> Router {
         .merge(settings::routes())
         // Admin API endpoints (token-scoped in the monolith; session-gated here).
         .route("/api/updates", get(api_updates))
+        .route("/api/updates/check", post(api_check_update))
         // The live-update WebSocket hub; slices publish into it as they arrive.
         .merge(ws::routes())
         // Vantage's own frontend: design system, page CSS/JS, vendored fonts,
@@ -685,6 +688,28 @@ async fn api_updates(account: Account) -> Result<Json<Vec<updates::ImageUpdate>>
     let mut updates: Vec<updates::ImageUpdate> = updates::image_updates_map().into_values().collect();
     updates.sort_by(|a, b| a.service.cmp(&b.service));
     Ok(Json(updates))
+}
+
+#[derive(serde::Deserialize)]
+struct CheckUpdateBody {
+    name: String,
+}
+
+/// `POST /api/updates/check` — re-check one service's image on demand (the
+/// Docker page's per-container "Check for updates"). Admin-only, not sudo: it is
+/// a read + registry poll, the same trust as `GET /api/updates`.
+async fn api_check_update(
+    State(state): State<AppState>,
+    account: Account,
+    Form(body): Form<CheckUpdateBody>,
+) -> Result<Json<updates::ImageUpdate>, StatusCode> {
+    if !account.is_admin() {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    updates::check_one(&state, &body.name)
+        .await
+        .map(Json)
+        .ok_or(StatusCode::NOT_FOUND)
 }
 
 /// The login page. Redirects to `/` when already signed in.
@@ -3409,6 +3434,83 @@ mod tests {
         let json = json_body(res).await;
         assert!(json["scripts"].as_array().unwrap().is_empty());
         assert!(json["runs"].as_array().unwrap().is_empty());
+    }
+
+    /// The unit list is the boundary, so the test that matters is the one that
+    /// proves an *unlisted* unit has no representation — not that a listed one
+    /// works. Neither case here reaches `systemctl`: the refusals happen before
+    /// the spawn, which is exactly why they are assertable on any host.
+    #[tokio::test]
+    async fn systemd_only_addresses_configured_units() {
+        let mut cfg = Config::test_default();
+        cfg.systemd_units = vec!["nginx.service".to_string()];
+        let state = build_state_with(cfg, Path::new(":memory:")).await.expect("build state");
+        create_admin_account(&state.db, "root", "hunter2!").await.unwrap();
+        let app = build_router(state.clone());
+
+        // Anonymous callers never see the page.
+        let res = app.clone().oneshot(get("/systemd")).await.unwrap();
+        assert_eq!(res.status(), StatusCode::SEE_OTHER);
+
+        let cookie_pair = login_as_root(&app).await;
+
+        // Acting on a unit is sudo-gated before anything else is considered.
+        let res = app
+            .clone()
+            .oneshot(json_post_with_cookie(
+                "/systemd/nginx.service/restart",
+                "",
+                &cookie_pair,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+        assert_eq!(json_body(res).await["reauth_required"], true);
+
+        let res = app
+            .clone()
+            .oneshot(json_post_with_cookie(
+                "/account/reauth",
+                r#"{"password":"hunter2!"}"#,
+                &cookie_pair,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+
+        // A unit the operator never listed does not exist here, even to an admin
+        // who has just re-authenticated.
+        let res = app
+            .clone()
+            .oneshot(json_post_with_cookie("/systemd/sshd.service/stop", "", &cookie_pair))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::NOT_FOUND, "an unlisted unit is unreachable");
+
+        // Neither does a verb outside the three the page offers — `mask` on a
+        // listed unit is still refused.
+        let res = app
+            .clone()
+            .oneshot(json_post_with_cookie("/systemd/nginx.service/mask", "", &cookie_pair))
+            .await
+            .unwrap();
+        assert_eq!(
+            res.status(),
+            StatusCode::BAD_REQUEST,
+            "only start/stop/restart are reachable"
+        );
+
+        // The refused attempt is on the record — that row is the point.
+        let blocked: i64 = state
+            .db
+            .get_row(
+                "SELECT COUNT(*) FROM audit_log WHERE action = ? AND ok = 0",
+                ("systemd.unit.action".to_string(),),
+                |r| r.get(0),
+            )
+            .await
+            .unwrap();
+        assert_eq!(blocked, 1, "asking for an unlisted unit is a recorded refusal");
     }
 
     /// The app's one arbitrary-command path: sudo-gated, and what it did is

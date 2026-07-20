@@ -134,6 +134,18 @@ async function refreshUpdates() {
   }
 }
 
+/* Force a registry check for one service now, then refresh its badge. */
+async function checkUpdate(name) {
+  try {
+    const u = await postUrlEncoded('/api/updates/check', { name });
+    await refreshUpdates();
+    const avail = u.state === 'update_available';
+    toast('ok', `${name}: ${avail ? 'update available' : u.state === 'up_to_date' ? 'up to date' : 'check done'}`);
+  } catch (e) {
+    reportError(e, `${name}: update check failed`);
+  }
+}
+
 /* =======================================================================
    Actions
    ======================================================================= */
@@ -214,6 +226,7 @@ grid?.addEventListener('click', (e) => {
   const menu = h(
     'div',
     { class: 'menu' },
+    h('button', { class: 'menu-item', onclick: () => checkUpdate(name) }, icon('refresh-cw'), 'Check for updates'),
     h('button', { class: 'menu-item', onclick: () => runAction(btn, name, 'pull') }, icon('download'), 'Pull image'),
     h('button', { class: 'menu-item', onclick: () => runAction(btn, name, 'recreate') }, icon('list-restart'), 'Recreate'),
     h('div', { class: 'menu-sep' }),

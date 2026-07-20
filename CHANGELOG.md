@@ -10,6 +10,11 @@ fixes and polish.
 
 ## [Unreleased]
 
+### Added
+
+- **Check for updates without waiting for the schedule.** Update checks used to run only on their background interval, so a fresh release could sit unnoticed until the next poll. The settings page's Version card now has a "Check for updates" button that runs the check on demand and re-renders with the result, and each service on the Docker page gains a "Check for updates" entry in its menu that re-queries just that image's registry and refreshes its badge. Both are read-only registry polls, so they need admin but not a password re-prompt.
+- **Your account has a name and a picture you can change.** The account page grows a Profile section: upload a PNG, JPEG or WebP as your profile picture (it replaces the initial in the sidebar, and you can remove it again), and rename the account. The name is what you sign in with, so changing it asks for your password first the way a password or two-factor change does — but it does not sign you out anywhere, and entries already in the audit log keep the name they were written with.
+
 ## [0.5.2] - 2026-07-20
 
 ### Fixed

@@ -125,6 +125,13 @@
         {% else %}
         <p class="field-hint">Vantage is up to date.</p>
         {% endif %}
+        {#
+            Always available: force a check now rather than waiting for the
+            background interval. Reloads the card with the fresh result.
+        #}
+        <div class="settings-actions">
+            <button class="btn quiet" type="button" id="check-update-btn">Check for updates</button>
+        </div>
     </div>
 </section>
 {% endblock %}

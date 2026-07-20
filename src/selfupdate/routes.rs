@@ -175,6 +175,17 @@ async fn get_status(account: Account) -> Result<Json<SelfUpdateStatus>, StatusCo
     Ok(Json(status()))
 }
 
+/// `POST /updates/self/check` — run a self-update check now instead of waiting
+/// for the background interval. Admin-only, not sudo: it is a read + network
+/// poll, the same trust as reading the status.
+async fn check_now(State(state): State<AppState>, account: Account) -> Result<Json<SelfUpdateStatus>, StatusCode> {
+    if !account.is_admin() {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    crate::selfupdate::run_check(&state).await;
+    Ok(Json(status()))
+}
+
 /// One helper so every refusal is audited identically. A refused self-update
 /// attempt is precisely the kind of event the audit log exists for.
 async fn refuse(state: &AppState, account: &Account, r: ApplyRefusal) -> (StatusCode, String) {
@@ -233,6 +244,7 @@ async fn apply(State(state): State<AppState>, sudo: Sudo) -> Result<Json<serde_j
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/updates/self", get(get_status))
+        .route("/updates/self/check", post(check_now))
         .route("/updates/apply", post(apply))
 }
 
