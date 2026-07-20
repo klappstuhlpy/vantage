@@ -80,6 +80,7 @@ mod safemode;
 mod sanitizer;
 mod secrets;
 mod security;
+mod selfupdate;
 mod session;
 mod settings;
 mod spotlight;
@@ -419,6 +420,9 @@ fn spawn_background(state: &AppState) {
     // The image-update checker: compares local Docker image digests against
     // the registry to detect available updates. No-op without Docker.
     updates::spawn_update_checker(state.clone());
+    // Vantage's own update checker: asks GitHub whether a newer release exists.
+    // Shares the image checker's interval setting; runs with or without Docker.
+    selfupdate::spawn_self_update_checker(state.clone());
     // The cron scheduler: runs operator scripts on their configured schedule.
     // No-op when no script carries a `schedule` field.
     cron::spawn_scheduler(state.clone());
