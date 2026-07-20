@@ -104,6 +104,17 @@ function tooltipPlugin({ formatY = (v) => v, formatX = absolute } = {}) {
   };
 }
 
+/* uPlot draws to a canvas, so it needs a pixel height — it cannot be told to
+ * fill its box the way a block element can. `height: 'fill'` measures the host
+ * instead, which is safe only because a filling host is a flex/grid item whose
+ * height comes from its container: the canvas placed inside it cannot feed back
+ * into that measurement and start a resize loop. A host sized by its own
+ * content must keep passing a number.
+ */
+function drawHeight(host, height) {
+  return height === 'fill' ? Math.max(host.clientHeight, 80) : height;
+}
+
 /* =======================================================================
    Factory
    ======================================================================= */
@@ -118,7 +129,7 @@ function tooltipPlugin({ formatY = (v) => v, formatX = absolute } = {}) {
  * @param {(v:number)=>string} [o.format]   y value formatter (axis + tooltip)
  * @param {boolean} [o.area]      fill under the line
  * @param {boolean} [o.legend]    force the legend on/off (default: labels.length > 1)
- * @param {number} [o.height]
+ * @param {number|'fill'} [o.height]  pixels, or 'fill' to take the host's own height
  * @param {[number,number]} [o.yRange] fixed y scale, e.g. [0, 100] for percent
  */
 export function createChart(host, o) {
@@ -158,7 +169,7 @@ export function createChart(host, o) {
 
   const opts = {
     width: host.clientWidth || 600,
-    height,
+    height: drawHeight(host, height),
     padding: [8, 8, 0, 0],
     // We render our own legend; uPlot's default table is not our design system.
     legend: { show: false },
@@ -185,7 +196,12 @@ export function createChart(host, o) {
         grid: { stroke: p.grid, width: 1 },
         ticks: { show: false },
         font: p.font,
-        size: 52,
+        /* Width from the labels that will actually be drawn, not a fixed 52px.
+           A percent axis tops out at "100%" and was paying for a byte-rate
+           label it never renders — that was the dead strip down the left of
+           the CPU and memory charts. `values` runs first, so these are the
+           formatted strings; the font is 11px mono, hence ~6.6px a character. */
+        size: (u, vals) => (vals?.length ? Math.round(Math.max(...vals.map((v) => v.length)) * 6.6) + 14 : 52),
         values: (u, vals) => vals.map((v) => format(v)),
       },
     ],
@@ -199,7 +215,7 @@ export function createChart(host, o) {
   // without the viewport changing at all.
   const ro = new ResizeObserver(() => {
     const w = host.clientWidth;
-    if (w > 0) chart.setSize({ width: w, height });
+    if (w > 0) chart.setSize({ width: w, height: drawHeight(host, height) });
   });
   ro.observe(host);
 
@@ -259,7 +275,7 @@ export function createSparkline(host, values, { color, height = 32 } = {}) {
   const chart = new uPlot(
     {
       width: host.clientWidth || 120,
-      height,
+      height: drawHeight(host, height),
       padding: [2, 1, 2, 1],
       legend: { show: false },
       cursor: { show: false },
@@ -273,7 +289,7 @@ export function createSparkline(host, values, { color, height = 32 } = {}) {
 
   const ro = new ResizeObserver(() => {
     const w = host.clientWidth;
-    if (w > 0) chart.setSize({ width: w, height });
+    if (w > 0) chart.setSize({ width: w, height: drawHeight(host, height) });
   });
   ro.observe(host);
   chart._vantageDestroy = () => {

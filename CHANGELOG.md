@@ -10,6 +10,12 @@ fixes and polish.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Pages no longer scroll sideways on a phone.** Every page could be dragged or pinched to the right into an empty band, and the heading beside it was crushed — "Overview" wrapping to one letter per line on the home page, and the same on Sanitizer, SSH and anywhere else a page carries buttons next to its title. The title and the buttons now move onto separate lines when there is no room for both, instead of the title giving up all its width and the buttons pushing off the edge of the screen.
+- **The CPU and memory charts on Metrics fill their cards.** Both plots stayed 200px tall inside a card stretched to match the taller network and disk charts beside them, leaving a dead band underneath, and both reserved a strip down the left for axis labels far wider than the percentages they draw. The plots now take the height of their card and only as much left margin as their labels need.
+- **Home widgets use their full height.** A widget stretched to match a taller neighbour left the extra space blank below its content. The CPU history sparkline now grows into it, and a widget showing only a single number centres that number rather than hanging it off the top.
+
 ## [0.4.2]
 
 ### Changed

@@ -80,12 +80,24 @@
     }
   }
 
+  /* The grid stretches widgets to their row's height (see `align-items` above),
+     but the body was not claiming that height — so a short widget grew a blank
+     band under its content instead of using it. */
   .widget-body {
+    flex: 1;
     padding: var(--sp-4);
     display: flex;
     flex-direction: column;
     gap: var(--sp-3);
     min-width: 0;
+  }
+
+  /* A body that is nothing but the headline number has nothing to fill the
+     extra height with, so it centres in it rather than hanging off the top.
+     Bodies with a chart or a list below the readout keep their top alignment —
+     there, the growing part is the chart or the list. */
+  .widget-body:has(> .readout:only-child) {
+    justify-content: center;
   }
 
   /* The headline number. */
@@ -124,8 +136,12 @@
     gap: var(--sp-3);
   }
 
+  /* The sparkline is the part of a chart widget that should absorb the slack,
+     so it grows and the readout above it stays its natural size. The height
+     comes from here, not from JS — dashboard.js passes `height: 'fill'`. */
   .w-chart {
     width: 100%;
+    flex: 1;
     min-height: 56px;
   }
 

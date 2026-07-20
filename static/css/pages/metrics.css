@@ -11,9 +11,25 @@
     color: var(--ink-3);
   }
 
+  /* Grid rows stretch, so a card next to a taller neighbour (the two-series
+     net/disk charts carry a legend the percent charts do not) is already the
+     full row height — it was only its chart that stayed 200px, leaving the dead
+     band under the CPU and memory plots. Make the box grow and let the chart
+     take it; `height: 'fill'` in metrics.js measures this element. */
+  .chart-grid .card,
+  .chart-grid .card-body {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .chart-grid .card-body {
+    flex: 1;
+  }
+
   /* uPlot needs a sized box before it measures; without a min-height the first
      paint collapses to zero and the chart renders 0px tall. */
   .chart-grid .chart {
+    flex: 1;
     min-height: 200px;
   }
 

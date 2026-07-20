@@ -213,6 +213,7 @@ function renderCharts(points) {
     data: [xs, points.map((p) => p.cpu_total)],
     format: (v) => `${v.toFixed(0)}%`,
     yRange: [0, 100],
+    height: 'fill',
   });
 
   charts.mem = createChart(hosts[1], {
@@ -220,18 +221,21 @@ function renderCharts(points) {
     data: [xs, points.map((p) => p.mem_used_pct)],
     format: (v) => `${v.toFixed(0)}%`,
     yRange: [0, 100],
+    height: 'fill',
   });
 
   charts.net = createChart(hosts[2], {
     labels: ['In', 'Out'],
     data: [xs, toRates(points, 'net_rx_bytes'), toRates(points, 'net_tx_bytes')],
     format: (v) => rate(v, 0),
+    height: 'fill',
   });
 
   charts.disk = createChart(hosts[3], {
     labels: ['Read', 'Write'],
     data: [xs, toRates(points, 'disk_read_bytes'), toRates(points, 'disk_write_bytes')],
     format: (v) => rate(v, 0),
+    height: 'fill',
   });
 
   const peak = Math.max(...points.map((p) => p.cpu_total));

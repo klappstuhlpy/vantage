@@ -528,8 +528,14 @@
     flex-wrap: wrap;
   }
 
+  /* A real flex-basis, not `flex: 1` (which is basis 0). With basis 0 this item
+     never asks for any width, so the `flex-wrap` above has nothing to wrap on:
+     the actions keep their max-content width, the title is squeezed toward zero
+     — "Overview" wrapping one character per line — and whatever the actions
+     cannot give up overflows the viewport, which is the phantom horizontal
+     scroll on narrow screens. A basis makes the row wrap before it squeezes. */
   .page-head-text {
-    flex: 1;
+    flex: 1 1 240px;
     min-width: 0;
   }
 
@@ -548,6 +554,7 @@
     align-items: center;
     gap: var(--sp-2);
     flex-wrap: wrap;
+    min-width: 0;
   }
 
   /* Sections stack with a consistent rhythm; pages should not set their own

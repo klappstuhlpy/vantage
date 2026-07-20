@@ -181,7 +181,7 @@ widgets.register({
     const host = h('div', { class: 'w-chart' });
     const last = points[points.length - 1];
     render(el, readout(percent(last.cpu_total), `peak ${percent(Math.max(...points.map((p) => p.cpu_total)))} in the last hour`), host);
-    createSparkline(host, points.map((p) => p.cpu_total), { height: 56 });
+    createSparkline(host, points.map((p) => p.cpu_total), { height: 'fill' });
   },
 });
 
