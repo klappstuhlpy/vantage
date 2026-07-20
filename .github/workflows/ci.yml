@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --check
+
+      - name: Lint
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test
+
+      # The asset and import checkers are part of the build contract: a template
+      # referencing a missing icon or element id is a runtime 404, which the Rust
+      # compiler cannot see.
+      - name: Check static assets
+        run: python scripts/check_assets.py
+
+      - name: Check JS imports
+        run: python scripts/check_imports.py
+
+      - name: Check the changelog extractor
+        run: python scripts/changelog_section.py --self-check

@@ -1118,10 +1118,19 @@ async fn shutdown_signal() {
 mod tests {
     use super::*;
 
+    /// Asserting `VERSION == env!("CARGO_PKG_VERSION")` would be tautological —
+    /// that *is* its definition. What is worth pinning is the shape: the update
+    /// checker compares dotted triples and treats anything else as "not newer",
+    /// so a `Cargo.toml` version that stopped being a triple would silently
+    /// disable update detection rather than fail.
     #[test]
-    fn version_is_the_crate_version() {
-        assert_eq!(VERSION, env!("CARGO_PKG_VERSION"));
-        assert_eq!(VERSION.split('.').count(), 3, "expected a semver triple, got {VERSION}");
+    fn the_crate_version_is_a_semver_triple() {
+        let parts: Vec<&str> = VERSION.split('.').collect();
+        assert_eq!(parts.len(), 3, "expected a semver triple, got {VERSION}");
+        assert!(
+            parts.iter().all(|p| p.parse::<u64>().is_ok()),
+            "every component must be numeric, got {VERSION}"
+        );
     }
 
     /// A hermetic in-memory state for tests — never touches the real `admin.db`

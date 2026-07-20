@@ -49,10 +49,21 @@ FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
-    docker.io \
     curl \
     ufw \
  && rm -rf /var/lib/apt/lists/*
+
+# The Docker CLI and the Compose v2 plugin, copied from Docker's own image.
+#
+# This used to be Debian's `docker.io` package, which ships the engine *and* the
+# CLI but not Compose v2 — Compose v2 is distributed by Docker, not by Debian.
+# The self-update helper runs `docker compose`, so that package would have left
+# us with a 250 MB image that still could not apply the update it offered. Only
+# the client is needed either way: every command here talks to the *host's*
+# daemon over the mounted socket, so the bundled daemon was always dead weight.
+COPY --from=docker:27-cli /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=docker:27-cli /usr/local/libexec/docker/cli-plugins/docker-compose \
+     /usr/local/libexec/docker/cli-plugins/docker-compose
 
 WORKDIR /app
 

@@ -1,16 +1,19 @@
 services:
   vantage:
     container_name: vantage
-    build:
-      context: .
-      # Forward the host SSH agent into the build so cargo can fetch the private
-      # klappstuhl_me-shared git dependency over SSH. The invoking shell's agent
-      # must hold a key with read access to klappstuhlpy/klappstuhl_me-shared.
-      # Requires BuildKit: `DOCKER_BUILDKIT=1 docker compose build` (default on
-      # modern Docker). The Dockerfile consumes this via `--mount=type=ssh`.
-      ssh:
-        - default=$HOME/.ssh/id_ed25519
-    image: vantage:latest
+    # The published multi-arch image (amd64 + arm64). A floating tag on purpose:
+    # the in-app updater applies a new release by running `compose pull` +
+    # `compose up` for this service, which can only pick up a new version if the
+    # tag is not pinned. Pin it to an exact version if you would rather update by
+    # hand — Vantage detects the pin and refuses the one-click path rather than
+    # reporting a success that changed nothing.
+    image: ghcr.io/klappstuhlpy/vantage:latest
+
+    # Building from source instead: comment out the `image` line above and
+    # uncomment this.
+    # build:
+    #   context: .
+
     restart: unless-stopped
 
     # Host networking: the container shares the host's network namespace so
