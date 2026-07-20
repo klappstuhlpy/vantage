@@ -486,9 +486,9 @@ format and the exposure policy may still change between minor versions.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Note that building requires SSH access to the
-private `klappstuhl_me-shared` repository, which limits outside contributions in
-practice.
+See [CONTRIBUTING.md](CONTRIBUTING.md). A clean checkout builds with nothing but a
+Rust toolchain — the shared kernel crates live in the public
+[kls-core](https://github.com/klappstuhlpy/kls-core) repository.
 
 ## License
 

@@ -2,36 +2,28 @@
 # Stage 1 – builder
 #
 # Uses the official Rust image.  git is required because several Cargo
-# dependencies are pulled directly from GitHub repositories — including the
-# PRIVATE klappstuhl_me-shared repo, which is fetched over SSH (see below).
+# dependencies are pulled directly from public GitHub repositories, including
+# the shared kls-core kernel.  No credentials are needed: anyone can build this
+# image from a clean checkout, which is the point.
 # ─────────────────────────────────────────────────────────────────────────────
 FROM rust:1.88-slim-bookworm AS builder
 
 # mold is a fast drop-in linker; .cargo/config.toml points the linux target at
 # it via rustflags, which cuts a big chunk off the final link step.
-# openssh-client provides ssh/ssh-keyscan for the private git-over-SSH fetch.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     libssl-dev \
     git \
-    openssh-client \
     mold \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
 
-# Seed github.com's host key so the SSH fetch doesn't fail strict host
-# verification, and forward an SSH key at build time via BuildKit's ssh mount.
-# Build with:  DOCKER_BUILDKIT=1 docker build --ssh default -t vantage .
-# (the default SSH agent must hold a key with read access to the shared repo).
-RUN mkdir -p -m 0700 ~/.ssh && ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
-
 # ── Build with persistent cargo + target cache ────────────────────────────────
 # BuildKit cache mounts persist the cargo registry/git checkouts and the
 # `target/` dir *across* builds, restoring incremental compilation.
 COPY . .
-RUN --mount=type=ssh \
-    --mount=type=cache,target=/usr/local/cargo/registry \
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/build/target \
     cargo build --release \

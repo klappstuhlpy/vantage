@@ -15,10 +15,10 @@ cargo fmt
 cargo clippy
 ```
 
-Note that Vantage depends on three private kernel crates (`kls-web-core`, `kls-ui`,
-`kls-agent`) fetched over SSH from `klappstuhl_me-shared`. **Without access to that
-repository the project does not build**, which means outside contributions are
-limited in practice. This is a known limitation, not an oversight.
+Vantage depends on two shared kernel crates, `kls-web-core` and `kls-agent`, which
+live in the public [kls-core](https://github.com/klappstuhlpy/kls-core) repository
+and are fetched over HTTPS. No credentials, SSH agent, or registry access is
+needed: a clean checkout builds with a Rust toolchain alone.
 
 Linux is recommended for real use — Docker, `/proc`/`/sys`, and the firewall
 backends are all Linux-only, and on other platforms those integrations report as

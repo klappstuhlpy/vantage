@@ -5,14 +5,20 @@ edition = "2021"
 license = "AGPL-v3"
 description = "Vantage — a security-first VPS/homelab control plane. Manage your server through a terminal-aesthetic web UI, backed by CLI."
 
-# Consumes the shared klappstuhl_me-shared kernel (kls-web-core, kls-agent) as
-# tag-pinned git dependencies, alongside the Percy dashboard and the main site.
+# Consumes the shared kls-core kernel (kls-web-core, kls-agent) as tag-pinned
+# git dependencies, alongside the Percy dashboard and the main site.
+#
+# Fetched over public HTTPS, not SSH: Vantage is AGPL-v3 and links both crates
+# statically, so anyone receiving a binary is entitled to the source of the
+# combined work — and an image nobody but its author can rebuild is a
+# credibility problem for a security tool beyond the licensing one.
+#
 # `kls-ui` is deliberately NOT a dependency: Vantage ships its own design system
 # in `static/` (see static/README.md). The site and the Percy dashboard still use
 # kls-ui; Vantage diverged so it can be a standalone product with its own look.
 [dependencies]
-kls-web-core = { git = "ssh://git@github.com/klappstuhlpy/klappstuhl_me-shared", tag = "v0.1.11" }
-kls-agent = { git = "ssh://git@github.com/klappstuhlpy/klappstuhl_me-shared", tag = "v0.1.11" }
+kls-web-core = { git = "https://github.com/klappstuhlpy/kls-core", tag = "v0.1.0" }
+kls-agent = { git = "https://github.com/klappstuhlpy/kls-core", tag = "v0.1.0" }
 anyhow = "1.0.80"
 argon2 = { version = "0.5.3", features = ["std"] }
 # Compile-time HTML templates for admin pages (own `templates/` dir). Askama
