@@ -29,6 +29,7 @@ use crate::AppState;
 pub enum ApplyRefusal {
     NotContainerized,
     NoSocket,
+    NotIdentified,
     NotCompose,
     PinnedTag,
     NoUpdate,
@@ -42,6 +43,9 @@ impl ApplyRefusal {
             }
             Self::NoSocket => {
                 "The Docker socket is not available to Vantage. Run `docker compose pull vantage && docker compose up -d vantage` on the host."
+            }
+            Self::NotIdentified => {
+                "Vantage could not identify its own container to inspect it. Run `docker compose pull vantage && docker compose up -d vantage` on the host."
             }
             Self::NotCompose => {
                 "This container was not started by Docker Compose. Recreate it with your usual tooling using the new image."
@@ -58,6 +62,7 @@ impl ApplyRefusal {
         match self {
             Self::NotContainerized => "not_containerized",
             Self::NoSocket => "no_socket",
+            Self::NotIdentified => "not_identified",
             Self::NotCompose => "not_compose",
             Self::PinnedTag => "pinned_tag",
             Self::NoUpdate => "no_update",
@@ -90,6 +95,23 @@ fn label_missing(s: &str) -> bool {
     s.is_empty() || s == "<no value>"
 }
 
+/// The container id carried by Docker's own per-container bind mounts
+/// (`/var/lib/docker/containers/<id>/hosts` and friends appear in
+/// `/proc/self/mountinfo` verbatim).
+///
+/// `$HOSTNAME` is *not* a reliable substitute: Vantage's compose file uses
+/// `network_mode: host`, which shares the host's UTS namespace, so the
+/// container's hostname is the machine's name and `docker inspect` on it finds
+/// nothing.
+fn container_id_from_mountinfo(mountinfo: &str) -> Option<String> {
+    mountinfo
+        .split("/containers/")
+        .skip(1)
+        .filter_map(|rest| rest.split('/').next())
+        .find(|id| id.len() == 64 && id.chars().all(|c| c.is_ascii_hexdigit()))
+        .map(str::to_string)
+}
+
 /// Resolves the running deployment, or the reason it cannot be updated in place.
 pub async fn detect_deployment() -> Result<Deployment, ApplyRefusal> {
     if !std::path::Path::new("/.dockerenv").exists() {
@@ -99,22 +121,29 @@ pub async fn detect_deployment() -> Result<Deployment, ApplyRefusal> {
         return Err(ApplyRefusal::NoSocket);
     }
 
-    // Docker sets the container hostname to the short container id by default.
-    let hostname = std::env::var("HOSTNAME").map_err(|_| ApplyRefusal::NotContainerized)?;
+    // The mount table first; `$HOSTNAME` (the short id, when Docker owns the UTS
+    // namespace) only as a fallback.
+    let id = std::fs::read_to_string("/proc/self/mountinfo")
+        .ok()
+        .as_deref()
+        .and_then(container_id_from_mountinfo)
+        .or_else(|| std::env::var("HOSTNAME").ok())
+        .ok_or(ApplyRefusal::NotIdentified)?;
 
     let out = HostCommand::new(Tool::Docker)
         .args([
             "inspect",
             "--format",
             "{{index .Config.Labels \"com.docker.compose.project.working_dir\"}}\t{{index .Config.Labels \"com.docker.compose.service\"}}\t{{.Config.Image}}",
-            hostname.as_str(),
+            id.as_str(),
         ])
         .output()
         .await
         .map_err(|_| ApplyRefusal::NoSocket)?;
 
+    // The socket answered; it simply did not know this id.
     if !out.status.success() {
-        return Err(ApplyRefusal::NoSocket);
+        return Err(ApplyRefusal::NotIdentified);
     }
 
     let text = String::from_utf8_lossy(&out.stdout);
@@ -133,7 +162,7 @@ pub async fn detect_deployment() -> Result<Deployment, ApplyRefusal> {
     Ok(Deployment {
         project_dir,
         service,
-        container: hostname,
+        container: id,
     })
 }
 
@@ -216,6 +245,7 @@ mod tests {
         for r in [
             ApplyRefusal::NotContainerized,
             ApplyRefusal::NoSocket,
+            ApplyRefusal::NotIdentified,
             ApplyRefusal::NotCompose,
             ApplyRefusal::PinnedTag,
             ApplyRefusal::NoUpdate,
@@ -232,6 +262,7 @@ mod tests {
         let slugs = [
             ApplyRefusal::NotContainerized.slug(),
             ApplyRefusal::NoSocket.slug(),
+            ApplyRefusal::NotIdentified.slug(),
             ApplyRefusal::NotCompose.slug(),
             ApplyRefusal::PinnedTag.slug(),
             ApplyRefusal::NoUpdate.slug(),
@@ -256,6 +287,29 @@ mod tests {
         // `registry:5000/owner/vantage` has a colon, but no tag.
         assert!(!is_pinned_tag("registry.example.com:5000/owner/vantage"));
         assert!(is_pinned_tag("registry.example.com:5000/owner/vantage:1.2.3"));
+    }
+
+    #[test]
+    fn the_container_id_is_read_from_the_mount_table() {
+        // A real line, as Docker writes it with `network_mode: host` — where
+        // $HOSTNAME is the machine's name and would inspect to nothing.
+        let id = "a".repeat(64);
+        let mountinfo = format!(
+            "641 640 0:75 / /proc rw shared:325 - proc proc rw\n\
+             650 640 259:2 /var/lib/docker/containers/{id}/hosts /etc/hosts rw - ext4 /dev/nvme0n1p2 rw\n"
+        );
+        assert_eq!(container_id_from_mountinfo(&mountinfo).as_deref(), Some(id.as_str()));
+
+        // Outside a container there is no such mount: the caller must fall back.
+        assert_eq!(
+            container_id_from_mountinfo("641 640 0:75 / /proc rw - proc proc rw\n"),
+            None
+        );
+        // A `/containers/` path that is not an id must not be mistaken for one.
+        assert_eq!(
+            container_id_from_mountinfo("1 2 0:3 / /srv/containers/data rw - ext4 x rw\n"),
+            None
+        );
     }
 
     #[test]

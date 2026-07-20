@@ -10,6 +10,12 @@ fixes and polish.
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-07-20
+
+### Fixed
+
+- **One-click updates work on the standard Compose setup.** Applying an update refused with "The Docker socket is not available to Vantage" even where the socket was mounted correctly. The shipped compose file runs Vantage with `network_mode: host`, which means the container answers to the *machine's* hostname rather than to its own id, so Vantage looked itself up under a name Docker had never heard of — and reported that miss as a missing socket. It now reads its own container id directly, and a genuine failure to identify itself says so rather than blaming the socket.
+
 ## [0.5.1] - 2026-07-20
 
 ### Fixed
@@ -206,7 +212,8 @@ fixes and polish.
 - Repeated failed logins from the same address are throttled independently of any firewall configuration, and login timing does not reveal whether a username exists.
 - Changes to the host are made through a typed, audited boundary rather than by shelling out.
 
-[Unreleased]: https://github.com/klappstuhlpy/vantage/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/klappstuhlpy/vantage/compare/v0.5.2...HEAD
+[0.5.2]: https://github.com/klappstuhlpy/vantage/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/klappstuhlpy/vantage/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/klappstuhlpy/vantage/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/klappstuhlpy/vantage/compare/v0.4.1...0.4.2
