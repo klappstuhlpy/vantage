@@ -48,28 +48,36 @@ every account. To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
 ## Requirements
 
-- Rust 1.74+ (2021 edition)
-- SSH access to the `klappstuhl_me-shared` private registry (for kernel crate dependencies)
+- Docker with the Compose v2 plugin — the supported deployment. Images are published for amd64 and arm64
 - Linux recommended for full functionality (Docker socket, `/proc`/`/sys`, firewall binaries)
-- Optional: `mold` linker (configured automatically on Linux builds)
 - Optional: GeoLite2-City.mmdb for GeoIP lookups
 - Optional: ClamAV daemon for file scanning
 - Optional: VirusTotal API key
 
 ## Quick Start
 
+Vantage is published at `ghcr.io/klappstuhlpy/vantage` — no clone, no build.
+
 ```bash
-# Build
-cargo build --release
+# Grab the compose file
+curl -O https://raw.githubusercontent.com/klappstuhlpy/vantage/master/docker-compose.yml
 
-# Bootstrap the first admin account (interactive, prompts for username/password)
-cargo run --release -- admin
+# First run — generates a default config.json, then stop again
+docker compose up -d && docker compose down
 
-# Start the server (default: vpn mode, 127.0.0.1:8443)
-cargo run --release
+# Edit the generated config (exposure mode, services, alert sinks, integrations)
+vim ./data/config/vantage/config.json
+
+# Bootstrap the first admin account (interactive)
+docker compose run --rm vantage ./vantage admin
+
+# Start permanently
+docker compose up -d
 ```
 
-On first run, a `config.json` is generated with a fresh signing key. Edit it to configure exposure mode, services, alert sinks, and integrations.
+On first run, a `config.json` is generated with a fresh signing key.
+
+To build from source instead, see [Development](#development).
 
 ## Configuration
 
@@ -402,24 +410,7 @@ A public-mode deployment exercising most fields:
 
 ## Docker
 
-The recommended deployment method. Requires BuildKit and SSH access to the private `klappstuhl_me-shared` repo.
-
-```bash
-# First run — generates a default config.json
-docker compose up -d
-docker compose down
-
-# Edit the generated config
-vim ./data/config/vantage/config.json
-
-# Bootstrap the admin account (interactive)
-docker compose run --rm vantage ./vantage admin
-
-# Start permanently
-docker compose up -d
-```
-
-The container uses **host networking** so the firewall backend operates on real host rules. Key volume mounts:
+The install flow is under [Quick Start](#quick-start). The container uses **host networking** so the firewall backend operates on real host rules. Key volume mounts:
 
 | Mount                           | Purpose                    |
 |---------------------------------|----------------------------|
@@ -432,7 +423,31 @@ The container uses **host networking** so the firewall backend operates on real 
 
 Capabilities granted: `NET_ADMIN` (firewall rule modification) and `NET_BIND_SERVICE` (port <1024 binding).
 
+## Updating
+
+Vantage checks the project's GitHub releases on the same schedule as the container
+image checks (`update_check_interval_hours`; `0` disables both), shows the new version
+and its release notes on the settings page, and alerts your configured sinks the first
+time a release appears. Nothing ever applies itself.
+
+The settings page can apply the update for you when all three hold:
+
+- Vantage runs in a container started by Docker Compose
+- its image tag floats (`:latest`) rather than pinning an exact version
+- `/var/run/docker.sock` is mounted into the container
+
+It asks for your password again first and records the attempt in the audit log. Any
+other setup is refused with the command to run by hand:
+
+```bash
+docker compose pull vantage && docker compose up -d vantage
+```
+
 ## Development
+
+Building from source needs Rust 1.74+ (2021 edition), and optionally the `mold` linker
+(configured automatically on Linux builds). To build the container instead of pulling
+it, uncomment the `build:` block in `docker-compose.yml`.
 
 ```bash
 cargo build                     # compile

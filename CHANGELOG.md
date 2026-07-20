@@ -10,6 +10,12 @@ fixes and polish.
 
 ## [Unreleased]
 
+### Added
+
+- **Vantage now tells you when a new version is out.** It checks the project's releases on the same schedule as the container image checks, shows the new version and its release notes on the settings page, and sends an alert to your configured sinks the first time a release appears. It uses the existing update-check interval, so setting that to 0 turns both off.
+- **One-click updates for Compose deployments.** When Vantage runs under Docker Compose on a floating image tag, the settings page can apply an update for you — it asks for your password again first, and records the attempt in the audit log. Every other setup gets the exact command to run instead.
+- **Official images.** Vantage is published at `ghcr.io/klappstuhlpy/vantage` for amd64 and arm64, so installing it no longer means cloning the repository and building it yourself.
+
 ### Fixed
 
 - **Pages no longer scroll sideways on a phone.** Every page could be dragged or pinched to the right into an empty band, and the heading beside it was crushed — "Overview" wrapping to one letter per line on the home page, and the same on Sanitizer, SSH and anywhere else a page carries buttons next to its title. The title and the buttons now move onto separate lines when there is no room for both, instead of the title giving up all its width and the buttons pushing off the edge of the screen.
