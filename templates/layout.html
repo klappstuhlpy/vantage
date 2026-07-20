@@ -201,6 +201,12 @@
                 <span class="account-name">Sign in</span>
             </a>
             {% endmatch %}
+            {#
+                Read straight off the constant rather than threaded through every
+                page's context struct: the version is identical for every render,
+                and a field on 21 structs would be 21 chances to forget it.
+            #}
+            <div class="sidebar-version" id="sidebar-version">v{{ crate::VERSION }}</div>
         </div>
     </aside>
 

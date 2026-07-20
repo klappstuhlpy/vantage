@@ -47,6 +47,11 @@ use crate::config::{Config, GuardProfile, Listener};
 use crate::session::Account;
 use crate::ws::LiveEvent;
 
+/// The running build's version, from `Cargo.toml`. The single source of truth —
+/// the sidebar, the update checker, and the audit trail all read this rather
+/// than carrying their own string.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 mod account;
 mod alerts;
 mod audit;
@@ -1096,6 +1101,12 @@ async fn shutdown_signal() {
 mod tests {
     use super::*;
 
+    #[test]
+    fn version_is_the_crate_version() {
+        assert_eq!(VERSION, env!("CARGO_PKG_VERSION"));
+        assert_eq!(VERSION.split('.').count(), 3, "expected a semver triple, got {VERSION}");
+    }
+
     /// A hermetic in-memory state for tests — never touches the real `admin.db`
     /// on disk or the operator's `config.json`.
     async fn test_state() -> AppState {
@@ -1232,6 +1243,17 @@ mod tests {
         // Presenting that cookie admits `/`.
         let res = app.oneshot(get_with_cookie("/", &cookie_pair)).await.unwrap();
         assert_eq!(res.status(), StatusCode::OK);
+
+        // The sidebar reads `crate::VERSION` directly rather than taking it from
+        // each page's context struct. That resolves at compile time, so a typo
+        // would be a build error — but a *silently empty* render would not be,
+        // and the version is what an operator quotes in a bug report.
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        let html = String::from_utf8_lossy(&body);
+        assert!(
+            html.contains(&format!("v{VERSION}")),
+            "the sidebar did not render the version"
+        );
     }
 
     /// A TOTP-enabled account cannot log in with the password alone: it is
@@ -2324,9 +2346,18 @@ mod tests {
 
         for (label, request) in [
             ("a page", get_with_cookie("/", &cookie_pair)),
-            ("a static asset", HttpRequest::builder().uri("/static/css/base.css").body(Body::empty()).unwrap()),
+            (
+                "a static asset",
+                HttpRequest::builder()
+                    .uri("/static/css/base.css")
+                    .body(Body::empty())
+                    .unwrap(),
+            ),
             // No cookie: this is refused before it reaches a handler.
-            ("an unauthenticated request", HttpRequest::builder().uri("/").body(Body::empty()).unwrap()),
+            (
+                "an unauthenticated request",
+                HttpRequest::builder().uri("/").body(Body::empty()).unwrap(),
+            ),
         ] {
             let res = app.clone().oneshot(request).await.unwrap();
             let headers = res.headers();
@@ -2338,7 +2369,10 @@ mod tests {
             assert!(csp.contains("default-src 'self'"), "{label} has a weakened CSP: {csp}");
             // Only `style-src` carries the inline escape (CodeMirror and
             // Cytoscape inject their own `<style>`); scripts stay strict.
-            assert!(csp.contains("script-src 'self';"), "{label} allows inline script: {csp}");
+            assert!(
+                csp.contains("script-src 'self';"),
+                "{label} allows inline script: {csp}"
+            );
             assert_eq!(headers.get("x-frame-options").unwrap(), "DENY", "{label}");
             assert_eq!(headers.get("x-content-type-options").unwrap(), "nosniff", "{label}");
         }
@@ -2351,7 +2385,9 @@ mod tests {
     async fn report_only_mode_swaps_the_header_rather_than_adding_one() {
         let mut config = Config::test_default();
         config.csp_report_only = true;
-        let state = build_state_with(config, std::path::Path::new(":memory:")).await.unwrap();
+        let state = build_state_with(config, std::path::Path::new(":memory:"))
+            .await
+            .unwrap();
         let app = build_router(state);
 
         let res = app

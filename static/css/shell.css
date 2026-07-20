@@ -243,6 +243,13 @@
     color: var(--ink-3);
   }
 
+  .sidebar-version {
+    padding: var(--sp-1) var(--sp-2) 0;
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    color: var(--ink-3);
+  }
+
   /* =====================================================================
      The Scope — the brand mark, and an honest live indicator.
      It sweeps only while the WebSocket is actually connected; shell.js sets
@@ -638,6 +645,7 @@
   /* Rail presentation — shared by the user-chosen rail and the auto-rail. */
   :root[data-sidebar='rail'] .nav-item-label,
   :root[data-sidebar='rail'] .brand-name,
+  :root[data-sidebar='rail'] .sidebar-version,
   :root[data-sidebar='rail'] .account-name,
   :root[data-sidebar='rail'] .nav-group-label,
   :root[data-sidebar='rail'] .account-btn > .icon:last-child,
@@ -663,6 +671,7 @@
   @media (max-width: 1080px) {
     .nav-item-label,
     .brand-name,
+    .sidebar-version,
     .account-name,
     .nav-group-label,
     .account-btn > .icon:last-child,
@@ -713,6 +722,7 @@
 
     .sidebar.is-open .nav-item-label,
     .sidebar.is-open .brand-name,
+    .sidebar.is-open .sidebar-version,
     .sidebar.is-open .account-name,
     .sidebar.is-open .nav-group-label,
     .sidebar.is-open .nav-item .count-badge {
