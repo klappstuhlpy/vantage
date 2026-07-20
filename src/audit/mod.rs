@@ -364,6 +364,7 @@ mod tests {
             flags: crate::FLAG_ADMIN,
             totp_enabled: false,
             totp_secret: None,
+            avatar_type: None,
             ip: Some("203.0.113.7".into()),
         }
     }

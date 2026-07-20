@@ -36,6 +36,58 @@
     </div>
 </div>
 
+{# ─── Profile ─────────────────────────────────────────────────────── #}
+<section>
+    <div class="section-head">
+        <h2>Profile</h2>
+    </div>
+    <div class="card">
+        <div class="card-body profile-grid">
+            {#
+                The picture is decorative in the sidebar, but here it is the
+                subject of the controls beside it, so it keeps a real alt text.
+            #}
+            <div class="profile-picture">
+                <img id="avatar-preview" class="avatar-lg" alt="Your profile picture"
+                     src="/account/avatar" hidden>
+                <span id="avatar-initial" class="avatar-lg" aria-hidden="true" hidden></span>
+                <div class="profile-picture-actions">
+                    {#
+                        A bare file input is styled inconsistently across browsers
+                        and reads poorly, so it sits behind a real button that
+                        forwards the click. The input keeps its label, so assistive
+                        tech still announces a file control.
+                    #}
+                    <input type="file" id="avatar-input" accept="image/png,image/jpeg,image/webp"
+                           class="sr-only" aria-label="Choose a profile picture">
+                    <button class="btn ghost" type="button" id="avatar-choose">Change picture</button>
+                    <button class="btn ghost danger" type="button" id="avatar-remove" hidden>Remove</button>
+                </div>
+                <span class="field-hint">PNG, JPEG or WebP, up to {{ max_avatar_kb }} KB.</span>
+                <span class="field-error" id="avatar-error" hidden></span>
+            </div>
+
+            <form id="name-form" class="stack">
+                <div class="field">
+                    <label for="account-name">Account name</label>
+                    <input class="input" id="account-name" type="text" required autocomplete="username"
+                           minlength="{{ min_name_len }}" maxlength="{{ max_name_len }}"
+                           value="{% match account %}{% when Some with (a) %}{{ a.name }}{% when None %}{% endmatch %}">
+                    <span class="field-hint">
+                        This is the name you sign in with, so changing it changes your login.
+                        Other sessions stay signed in.
+                    </span>
+                    <span class="field-error" id="name-error" hidden></span>
+                </div>
+
+                <div class="form-actions">
+                    <button class="btn" type="submit" id="name-save">Change name</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</section>
+
 {# ─── Password ────────────────────────────────────────────────────── #}
 <section>
     <div class="section-head">

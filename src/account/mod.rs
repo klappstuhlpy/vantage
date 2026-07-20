@@ -77,6 +77,123 @@ pub async fn set_password(db: &Database, account_id: i64, hash: String) -> anyho
     Ok(())
 }
 
+// ─── Profile: the account name ───────────────────────────────────────────────
+
+/// Bounds on the account name. It is the login identifier, not a display label,
+/// so it has to stay something a person can type at a sign-in prompt on a
+/// console with no clipboard.
+pub const MIN_NAME_LEN: usize = 2;
+pub const MAX_NAME_LEN: usize = 32;
+
+/// Validates a proposed account name, returning the trimmed form to store.
+///
+/// Surrounding whitespace is trimmed rather than rejected — a name pasted with a
+/// trailing space is a name whose owner cannot sign in and cannot see why.
+/// Control characters are refused outright for the same reason.
+pub fn validate_name(name: &str) -> Result<String, String> {
+    let name = name.trim();
+    let len = name.chars().count();
+    if len < MIN_NAME_LEN {
+        return Err(format!("Use at least {MIN_NAME_LEN} characters."));
+    }
+    if len > MAX_NAME_LEN {
+        return Err(format!("Use at most {MAX_NAME_LEN} characters."));
+    }
+    if name.chars().any(|c| c.is_control()) {
+        return Err("That name contains a character that cannot be typed at a login prompt.".into());
+    }
+    Ok(name.to_owned())
+}
+
+/// Whether a rename collided with an existing account name.
+pub struct NameTaken;
+
+/// Renames an account. `Err(NameTaken)` when the name already belongs to someone
+/// — enforced by the column's UNIQUE constraint rather than by a check-then-
+/// write, which two concurrent renames could both pass.
+pub async fn set_name(db: &Database, account_id: i64, name: &str) -> anyhow::Result<Result<(), NameTaken>> {
+    let result = db
+        .execute(
+            "UPDATE account SET name = ? WHERE id = ?",
+            (name.to_string(), account_id),
+        )
+        .await;
+    match result {
+        Ok(_) => Ok(Ok(())),
+        // The pool erases the rusqlite error type, so the constraint is
+        // recognised by its message. A UNIQUE violation is the only way this
+        // statement fails on an already-validated name.
+        Err(e) if e.to_string().to_lowercase().contains("unique") => Ok(Err(NameTaken)),
+        Err(e) => Err(anyhow::Error::new(e).context("could not change the account name")),
+    }
+}
+
+// ─── Profile: the avatar ─────────────────────────────────────────────────────
+
+/// The largest avatar accepted. Generous for a picture rendered at 32px and
+/// small enough that the row stays cheap to read and to back up.
+pub const MAX_AVATAR_BYTES: usize = 256 * 1024;
+
+/// Identifies an image by its leading bytes, or `None` if it is not one of the
+/// three formats every browser renders.
+///
+/// The upload's own `Content-Type` is never consulted. This value is echoed back
+/// as the `Content-Type` of `GET /account/avatar`, so trusting the client here
+/// would let it serve `image/svg+xml` — a scriptable document — from Vantage's
+/// own origin.
+pub fn sniff_image(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Some("image/png");
+    }
+    if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        return Some("image/jpeg");
+    }
+    // RIFF....WEBP — the four length bytes between the two tags are skipped.
+    if bytes.len() > 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" {
+        return Some("image/webp");
+    }
+    None
+}
+
+/// Stores an avatar, replacing any previous one.
+pub async fn set_avatar(db: &Database, account_id: i64, bytes: Vec<u8>, mime: &'static str) -> anyhow::Result<()> {
+    db.execute(
+        "UPDATE account SET avatar = ?, avatar_type = ? WHERE id = ?",
+        (bytes, mime, account_id),
+    )
+    .await
+    .context("could not save the picture")?;
+    Ok(())
+}
+
+/// Removes an avatar, falling the UI back to the initial.
+pub async fn clear_avatar(db: &Database, account_id: i64) -> anyhow::Result<()> {
+    db.execute(
+        "UPDATE account SET avatar = NULL, avatar_type = NULL WHERE id = ?",
+        (account_id,),
+    )
+    .await
+    .context("could not remove the picture")?;
+    Ok(())
+}
+
+/// Reads an avatar back. `None` when the account has none.
+///
+/// Deliberately *not* carried on [`Account`]: that struct is loaded by the
+/// extractor on every authenticated request, and dragging a quarter-megabyte of
+/// image through every one of them to draw a 32px circle would be absurd. The
+/// extractor loads `avatar_type` alone — enough to know whether to point an
+/// `<img>` at this route.
+pub async fn load_avatar(db: &Database, account_id: i64) -> Option<(Vec<u8>, String)> {
+    db.get_row(
+        "SELECT avatar, avatar_type FROM account WHERE id = ? AND avatar IS NOT NULL",
+        (account_id,),
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .await
+    .ok()
+}
+
 // ─── Sessions ────────────────────────────────────────────────────────────────
 
 /// One row of the session list.
@@ -543,6 +660,33 @@ mod tests {
         // A finder pattern alone guarantees dark modules; an all-light matrix
         // would mean we serialised the wrong thing.
         assert!(qr.modules.contains('1'));
+    }
+
+    #[test]
+    fn a_name_is_trimmed_and_bounded() {
+        assert_eq!(validate_name("  root  ").unwrap(), "root");
+        assert_eq!(validate_name(&"a".repeat(MAX_NAME_LEN)).unwrap().len(), MAX_NAME_LEN);
+        assert!(validate_name("a").is_err());
+        assert!(validate_name("   ").is_err());
+        assert!(validate_name(&"a".repeat(MAX_NAME_LEN + 1)).is_err());
+        // A name that cannot be typed at a console login is not a name.
+        assert!(validate_name("ro\not").is_err());
+        assert!(validate_name("ro\tot").is_err());
+    }
+
+    #[test]
+    fn only_real_browser_renderable_images_are_accepted() {
+        assert_eq!(sniff_image(b"\x89PNG\r\n\x1a\n\x00\x00"), Some("image/png"));
+        assert_eq!(sniff_image(&[0xFF, 0xD8, 0xFF, 0xE0, 0x00]), Some("image/jpeg"));
+        assert_eq!(sniff_image(b"RIFF\x24\x00\x00\x00WEBPVP8 "), Some("image/webp"));
+
+        // The one that matters: SVG is a scriptable document, and this response's
+        // Content-Type comes from here.
+        assert_eq!(sniff_image(b"<svg xmlns=\"http://www.w3.org/2000/svg\">"), None);
+        assert_eq!(sniff_image(b"GIF89a"), None);
+        assert_eq!(sniff_image(b""), None);
+        // A truncated RIFF header must not index past the end.
+        assert_eq!(sniff_image(b"RIFF\x24\x00\x00\x00WEB"), None);
     }
 
     #[test]

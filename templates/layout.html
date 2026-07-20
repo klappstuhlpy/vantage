@@ -152,6 +152,10 @@
                     <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#square-terminal"/></svg>
                     <span class="nav-item-label">Scripts</span>
                 </a>
+                <a href="/systemd" class="nav-item" data-page="systemd"{% if active_page == "systemd" %} aria-current="page"{% endif %}>
+                    <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#cpu"/></svg>
+                    <span class="nav-item-label">Units</span>
+                </a>
                 <a href="/audit" class="nav-item" data-page="audit"{% if active_page == "audit" %} aria-current="page"{% endif %}>
                     <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#history"/></svg>
                     <span class="nav-item-label">Audit log</span>
@@ -180,7 +184,11 @@
                     label, so the initial is hidden from assistive tech rather
                     than read out as a stray letter.
                 #}
+                {% if account.has_avatar() %}
+                <img class="avatar" src="/account/avatar" alt="" aria-hidden="true" width="26" height="26">
+                {% else %}
                 <span class="avatar" aria-hidden="true">{{ account.initial() }}</span>
+                {% endif %}
                 <span class="account-name">{{ account.name }}</span>
                 <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#chevron-up"/></svg>
             </button>

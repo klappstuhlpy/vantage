@@ -5,6 +5,11 @@
 //! DELETE /account/sessions/:id        — revoke one session
 //! POST   /account/sessions/revoke-all — revoke every session but this one
 //! POST   /account/password            — change password (sudo)
+//! POST   /account/name                — change the account name (sudo)
+//!
+//! GET    /account/avatar              — the profile picture, or 404
+//! POST   /account/avatar              — replace it (raw image body)
+//! DELETE /account/avatar              — remove it
 //!
 //! GET    /account/reauth              — what re-authentication needs (methods)
 //! POST   /account/reauth              — re-authenticate; stamps the sudo window
@@ -112,6 +117,128 @@ pub fn routes() -> Router<AppState> {
         .route("/account/totp/disable", post(totp_disable))
         .route("/account/recovery", post(regenerate_recovery_codes))
         .route("/account/prefs", get(get_prefs).put(put_prefs))
+        .route("/account/name", post(change_name))
+        .route(
+            "/account/avatar",
+            get(get_avatar).post(upload_avatar).delete(delete_avatar),
+        )
+}
+
+// ─── Profile ─────────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct NameBody {
+    name: String,
+}
+
+/// Changes the account name.
+///
+/// Sudo-gated because the name *is* the login identifier: renaming changes how
+/// you sign in, which is a credential change wearing a cosmetic hat. Sessions
+/// are not revoked — they key on `account_id`, so a rename invalidates nothing,
+/// and signing the operator out of every browser over a spelling fix would be a
+/// punishment rather than a safeguard.
+///
+/// The audit log keeps its own copy of the name on each row (see `sql/12.sql`),
+/// so history written before the rename still reads correctly afterwards; this
+/// entry is what joins the two names together.
+async fn change_name(State(state): State<AppState>, sudo: Sudo, Json(body): Json<NameBody>) -> Response {
+    let name = match account::validate_name(&body.name) {
+        Ok(name) => name,
+        Err(message) => return fail(StatusCode::BAD_REQUEST, message),
+    };
+    if name == sudo.account.name {
+        return Json(serde_json::json!({ "name": name })).into_response();
+    }
+
+    match account::set_name(&state.db, sudo.account.id, &name).await {
+        Ok(Ok(())) => {
+            audit::event("account.name.change", &sudo.account)
+                .target(&name)
+                .detail(serde_json::json!({ "from": sudo.account.name }))
+                .record(&state.db)
+                .await;
+            Json(serde_json::json!({ "name": name })).into_response()
+        }
+        Ok(Err(account::NameTaken)) => fail(StatusCode::CONFLICT, "Another account already uses that name."),
+        Err(e) => server_error(e, "changing the account name failed"),
+    }
+}
+
+/// Serves the avatar.
+///
+/// Behind [`Account`] like the rest of the page: this is a picture of the
+/// operator on a control plane, not a public asset, and an unauthenticated
+/// endpoint here would confirm to anyone who asked that this box has an account
+/// with a face attached.
+///
+/// The `Content-Type` is the sniffed value stored at upload — never anything the
+/// client said — and `nosniff` stops the browser second-guessing it.
+async fn get_avatar(State(state): State<AppState>, account: Account, headers: HeaderMap) -> Response {
+    let Some((bytes, mime)) = account::load_avatar(&state.db, account.id).await else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    // The sidebar renders this on every page, so an unconditional 200 would
+    // re-send the image on every navigation. The tag covers the bytes, so
+    // replacing the picture busts it without the URL having to change.
+    let etag = format!("\"{:x}\"", <sha2::Sha256 as sha2::Digest>::digest(&bytes));
+    if headers
+        .get(axum::http::header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v == etag)
+    {
+        return StatusCode::NOT_MODIFIED.into_response();
+    }
+
+    (
+        [
+            (axum::http::header::CONTENT_TYPE, mime),
+            (axum::http::header::ETAG, etag),
+            (
+                axum::http::header::CACHE_CONTROL,
+                "private, max-age=0, must-revalidate".to_owned(),
+            ),
+            (axum::http::header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_owned()),
+        ],
+        bytes,
+    )
+        .into_response()
+}
+
+/// Replaces the avatar. The body is the raw image — no multipart, because there
+/// is exactly one field and a form boundary would be packaging for nothing.
+///
+/// Not sudo-gated: unlike the name, a picture is not a credential and cannot be
+/// used to sign in as anyone.
+async fn upload_avatar(State(state): State<AppState>, account: Account, body: axum::body::Bytes) -> Response {
+    if body.len() > account::MAX_AVATAR_BYTES {
+        return fail(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            format!("That picture is larger than {} KB.", account::MAX_AVATAR_BYTES / 1024),
+        );
+    }
+    let Some(mime) = account::sniff_image(&body) else {
+        return fail(StatusCode::BAD_REQUEST, "That file is not a PNG, JPEG or WebP image.");
+    };
+
+    let size = body.len();
+    if let Err(e) = account::set_avatar(&state.db, account.id, body.to_vec(), mime).await {
+        return server_error(e, "saving the avatar failed");
+    }
+    audit::event("account.avatar.change", &account)
+        .detail(serde_json::json!({ "bytes": size, "type": mime }))
+        .record(&state.db)
+        .await;
+    Json(serde_json::json!({ "type": mime })).into_response()
+}
+
+async fn delete_avatar(State(state): State<AppState>, account: Account) -> Response {
+    if let Err(e) = account::clear_avatar(&state.db, account.id).await {
+        return server_error(e, "removing the avatar failed");
+    }
+    audit::event("account.avatar.remove", &account).record(&state.db).await;
+    StatusCode::NO_CONTENT.into_response()
 }
 
 // ─── Page ────────────────────────────────────────────────────────────────────
@@ -125,6 +252,9 @@ struct AccountTemplate {
     recovery_remaining: i64,
     recovery_total: usize,
     min_password_len: usize,
+    min_name_len: usize,
+    max_name_len: usize,
+    max_avatar_kb: usize,
     sudo_window_minutes: i64,
     /// Whether passkey management can be offered at all. Always false today —
     /// `webauthn-rs` has not reached `kls-web-core`. The section renders a stated
@@ -141,6 +271,9 @@ async fn account_page(State(state): State<AppState>, account: Account) -> Accoun
         recovery_remaining: status.recovery_remaining,
         recovery_total: status.recovery_total,
         min_password_len: account::MIN_PASSWORD_LEN,
+        min_name_len: account::MIN_NAME_LEN,
+        max_name_len: account::MAX_NAME_LEN,
+        max_avatar_kb: account::MAX_AVATAR_BYTES / 1024,
         sudo_window_minutes: account::SUDO_WINDOW_MINUTES,
         passkeys_available: false,
     }

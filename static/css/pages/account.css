@@ -13,6 +13,60 @@
   }
 
   /* ---------------------------------------------------------------------
+     Profile
+
+     The picture and the name sit side by side while there is room for both,
+     and stack below that. The picture column is sized to its content, so the
+     name field takes whatever is left rather than the two splitting evenly.
+     --------------------------------------------------------------------- */
+  .profile-grid {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: var(--sp-5);
+    align-items: start;
+  }
+
+  .profile-picture {
+    display: grid;
+    justify-items: center;
+    gap: var(--sp-2);
+    max-width: 15rem;
+  }
+
+  .profile-picture-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: var(--sp-2);
+  }
+
+  /* The same circle as the sidebar avatar, at a size where a photograph is
+     worth looking at. `object-fit` matters: an uploaded picture is whatever
+     aspect ratio the operator had, and letting it stretch to a square is the
+     one reliable way to make every face look wrong. */
+  .avatar-lg {
+    display: grid;
+    place-items: center;
+    width: 72px;
+    height: 72px;
+    border-radius: var(--r-full);
+    background: var(--acc-soft);
+    border: 1px solid var(--acc-line);
+    object-fit: cover;
+    color: var(--acc);
+    font-family: var(--font-mono);
+    font-size: var(--fs-xl);
+    text-transform: uppercase;
+  }
+
+  @media (max-width: 720px) {
+    .profile-grid {
+      grid-template-columns: minmax(0, 1fr);
+      justify-items: center;
+    }
+  }
+
+  /* ---------------------------------------------------------------------
      Forms
      --------------------------------------------------------------------- */
   .stack {

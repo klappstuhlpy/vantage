@@ -9,7 +9,7 @@
  * simply succeeds, which is also what they look like when it does.
  */
 
-import { get, post, del } from '../core/api.js';
+import { get, post, del, request } from '../core/api.js';
 import { relative, absolute } from '../core/format.js';
 import {
   h,
@@ -330,6 +330,111 @@ $('codes-download')?.addEventListener('click', () => {
   const link = h('a', { href: url, download: 'vantage-recovery-codes.txt' });
   link.click();
   URL.revokeObjectURL(url);
+});
+
+// ─── Profile ─────────────────────────────────────────────────────────────────
+
+const nameForm = $('name-form');
+const nameInput = $('account-name');
+const nameError = $('name-error');
+
+/* The name the page was rendered with. Kept so a rename can be told from a
+ * no-op, and so the initial fallback has a letter to draw. */
+const renderedName = nameInput?.value ?? '';
+
+nameForm?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  nameError.hidden = true;
+
+  const name = nameInput.value.trim();
+  if (name === renderedName) return;
+
+  await withLoading($('name-save'), async () => {
+    try {
+      await post('/account/name', { name });
+    } catch (err) {
+      // A taken name and a too-short one are both the operator's to fix, and
+      // both belong beside the field rather than in a toast that outlives it.
+      nameError.textContent = err.message;
+      nameError.hidden = false;
+      return;
+    }
+    // The sidebar renders the name on every page from the server-side struct,
+    // so it stays stale until a reload. Same reasoning as the recovery flow.
+    window.location.reload();
+  }, { errorTitle: 'Could not change the name' });
+});
+
+// ─── Profile picture ─────────────────────────────────────────────────────────
+
+const avatarInput = $('avatar-input');
+const avatarPreview = $('avatar-preview');
+const avatarInitial = $('avatar-initial');
+const avatarRemove = $('avatar-remove');
+const avatarError = $('avatar-error');
+
+/* Which stand-in shows. The page is server-rendered without being told whether
+ * an image exists, so the <img> is asked to load and its own outcome decides:
+ * one request answers the question, rather than a second endpoint reporting on
+ * the first. */
+function showInitial() {
+  avatarPreview.hidden = true;
+  avatarInitial.textContent = (renderedName[0] || '?').toUpperCase();
+  avatarInitial.hidden = false;
+  avatarRemove.hidden = true;
+}
+
+avatarPreview?.addEventListener('load', () => {
+  avatarPreview.hidden = false;
+  avatarInitial.hidden = true;
+  avatarRemove.hidden = false;
+});
+avatarPreview?.addEventListener('error', showInitial);
+
+$('avatar-choose')?.addEventListener('click', () => avatarInput.click());
+
+avatarInput?.addEventListener('change', async () => {
+  const file = avatarInput.files?.[0];
+  if (!file) return;
+  avatarError.hidden = true;
+
+  await withLoading($('avatar-choose'), async () => {
+    try {
+      // The raw file as the body: one field needs no multipart envelope. The
+      // server sniffs the bytes and ignores this Content-Type, so it is a hint
+      // for anything in between, not a claim the server acts on.
+      await request('/account/avatar', {
+        method: 'POST',
+        body: file,
+        headers: { 'Content-Type': file.type || 'application/octet-stream' },
+      });
+    } catch (err) {
+      avatarError.textContent = err.message;
+      avatarError.hidden = false;
+      return;
+    }
+    // The URL never changes, so the ETag is what busts the cache: a plain
+    // reload revalidates and picks up the new bytes.
+    window.location.reload();
+  }, { errorTitle: 'Could not save the picture' });
+
+  // Let the same file be picked again after a failure.
+  avatarInput.value = '';
+});
+
+avatarRemove?.addEventListener('click', async (e) => {
+  const ok = await confirm({
+    title: 'Remove your picture?',
+    message: 'Your sidebar goes back to showing the first letter of your name.',
+    confirmLabel: 'Remove',
+    danger: true,
+  });
+  if (!ok) return;
+
+  await withLoading(e.currentTarget, async () => {
+    await del('/account/avatar');
+    window.location.reload();
+  }, { errorTitle: 'Could not remove the picture' });
 });
 
 loadSessions();

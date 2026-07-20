@@ -40,6 +40,11 @@ pub struct Account {
     /// The encrypted (ChaCha20-Poly1305) TOTP shared secret, when enrolled.
     /// Decrypted only at the 2FA verification step (see `crate::totp`).
     pub totp_secret: Option<String>,
+    /// The avatar's MIME type when one is set — the *type* only, never the
+    /// bytes. This struct is loaded on every authenticated request; the image
+    /// itself is read by `GET /account/avatar` alone
+    /// (see [`crate::account::load_avatar`]).
+    pub avatar_type: Option<String>,
     /// The address this request arrived from — the socket peer, which is the
     /// same source of truth the public guard uses (Vantage binds directly, so
     /// there is no `X-Forwarded-For` to spoof; see [`crate::guard`]).
@@ -64,7 +69,13 @@ impl Account {
         self.totp_enabled
     }
 
-    /// First character of the name, uppercased — the sidebar avatar.
+    /// Whether to point the sidebar at `/account/avatar` instead of drawing the
+    /// initial.
+    pub fn has_avatar(&self) -> bool {
+        self.avatar_type.is_some()
+    }
+
+    /// First character of the name, uppercased — the sidebar avatar's fallback.
     ///
     /// Lives here rather than in the template because Askama's expression
     /// parser is not Rust: chained `chars().next().unwrap_or('?')` with a char
@@ -86,6 +97,7 @@ fn row_to_account(row: &rusqlite::Row<'_>) -> rusqlite::Result<Account> {
         flags: row.get(3)?,
         totp_enabled: row.get::<_, i64>(4)? != 0,
         totp_secret: row.get(5)?,
+        avatar_type: row.get(6)?,
         ip: None,
     })
 }
@@ -93,7 +105,7 @@ fn row_to_account(row: &rusqlite::Row<'_>) -> rusqlite::Result<Account> {
 /// Looks up an account by (unique) name. `None` when absent.
 pub async fn account_by_name(db: &Database, name: &str) -> Option<Account> {
     db.get_row(
-        "SELECT id, name, password, flags, totp_enabled, totp_secret FROM account WHERE name = ?",
+        "SELECT id, name, password, flags, totp_enabled, totp_secret, avatar_type FROM account WHERE name = ?",
         (name.to_string(),),
         row_to_account,
     )
@@ -104,7 +116,7 @@ pub async fn account_by_name(db: &Database, name: &str) -> Option<Account> {
 /// Looks up an account by id (used to resume a pending 2FA challenge). `None` when absent.
 pub async fn account_by_id(db: &Database, id: i64) -> Option<Account> {
     db.get_row(
-        "SELECT id, name, password, flags, totp_enabled, totp_secret FROM account WHERE id = ?",
+        "SELECT id, name, password, flags, totp_enabled, totp_secret, avatar_type FROM account WHERE id = ?",
         (id,),
         row_to_account,
     )
@@ -117,7 +129,7 @@ pub async fn account_by_id(db: &Database, id: i64) -> Option<Account> {
 pub async fn session_account(db: &Database, session_id: &str, account_id: i64) -> Option<Account> {
     db.get_row(
         "SELECT account.id, account.name, account.password, account.flags, account.totp_enabled, \
-                account.totp_secret \
+                account.totp_secret, account.avatar_type \
          FROM account INNER JOIN session ON session.account_id = account.id \
          WHERE session.id = ? AND session.account_id = ? AND session.api_key = 0 \
            AND session.created_at >= datetime('now', ?)",
