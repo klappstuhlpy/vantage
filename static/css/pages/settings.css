@@ -18,4 +18,32 @@
     gap: var(--sp-4);
     flex-wrap: wrap;
   }
+
+  /* The version card sits outside the form — it is an action, not an override —
+     so it needs the gap the form's flex stack gives every other card. */
+  #update-card {
+    margin-top: var(--sp-5);
+  }
+
+  #update-card .card-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-4);
+  }
+
+  /* Release notes arrive as markdown. Rendering them properly would mean
+     shipping a parser for one card; a monospace block is honest and readable,
+     and the "Release notes" link goes to the formatted version. */
+  .release-notes {
+    max-height: 220px;
+    overflow: auto;
+    margin: 0;
+    padding: var(--sp-3);
+    background: var(--bg-2);
+    border: 1px solid var(--line-1);
+    border-radius: var(--r-s);
+    font-size: var(--fs-sm);
+    white-space: pre-wrap;
+    color: var(--ink-2);
+  }
 }

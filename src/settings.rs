@@ -39,7 +39,7 @@ use kls_web_core::Database;
 
 use crate::account::routes::Sudo;
 use crate::session::Account;
-use crate::{audit, backup, updates, AppState};
+use crate::{audit, backup, selfupdate, updates, AppState};
 
 /// `storage` keys holding the durable overrides. Absent = no override.
 const K_AUDIT_RETENTION: &str = "settings.audit_retention_days";
@@ -156,6 +156,15 @@ struct SettingsTemplate {
     update_interval_default: u64,
     backup_interval_hours: String,
     backup_interval_default: u64,
+    /// The self-update card. `update_notes` is the release body as markdown;
+    /// Askama escapes it and the page renders it as preformatted text rather
+    /// than shipping a markdown parser for one card.
+    current_version: &'static str,
+    update_available: bool,
+    update_version: String,
+    update_published: String,
+    update_notes: String,
+    update_url: String,
     backup_keep: String,
     backup_keep_default: usize,
 }
@@ -171,6 +180,8 @@ async fn page(State(state): State<AppState>, account: Account) -> Result<Setting
         return Err(StatusCode::FORBIDDEN);
     }
     let o = state.settings.get();
+    let su = selfupdate::status();
+    let latest = su.latest;
     Ok(SettingsTemplate {
         account: Some(account),
         active_page: "settings",
@@ -182,6 +193,12 @@ async fn page(State(state): State<AppState>, account: Account) -> Result<Setting
         backup_interval_default: backup::config_interval_hours(&state),
         backup_keep: field(o.backup_keep),
         backup_keep_default: backup::config_keep(&state),
+        current_version: crate::VERSION,
+        update_available: su.state == selfupdate::SelfUpdateState::UpdateAvailable,
+        update_version: latest.as_ref().map(|r| r.version.clone()).unwrap_or_default(),
+        update_published: latest.as_ref().and_then(|r| r.published_at.clone()).unwrap_or_default(),
+        update_notes: latest.as_ref().map(|r| r.notes.clone()).unwrap_or_default(),
+        update_url: latest.as_ref().map(|r| r.url.clone()).unwrap_or_default(),
     })
 }
 

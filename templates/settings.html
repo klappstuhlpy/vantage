@@ -91,6 +91,42 @@
         <span class="field-hint" id="settings-note">Changes apply to the next scheduled run — no restart needed.</span>
     </div>
 </form>
+
+{#
+    Outside the form on purpose: this is a one-off action, not an override that
+    saves with the others, and a <button> inside the form would submit it.
+#}
+<section class="card" id="update-card">
+    <div class="card-header">
+        <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#download"/></svg>
+        <h2>Version</h2>
+        <span class="eyebrow">v{{ current_version }}</span>
+    </div>
+    <div class="card-body">
+        {% if update_available %}
+        <p class="field-hint">
+            <strong>{{ update_version }}</strong> is available{% if update_published != "" %} · published {{ update_published }}{% endif %}
+        </p>
+        {% if update_notes != "" %}
+        <pre class="release-notes">{{ update_notes }}</pre>
+        {% endif %}
+        <div class="settings-actions">
+            <button class="btn" type="button" id="apply-update-btn">Update now</button>
+            {% if update_url != "" %}
+            <a class="btn quiet" href="{{ update_url }}" target="_blank" rel="noopener">Release notes</a>
+            {% endif %}
+        </div>
+        {#
+            A refusal is the expected answer on a deployment Vantage cannot
+            update in place, and it carries the command to run by hand — so it
+            is shown here rather than thrown away in a toast.
+        #}
+        <p class="field-hint" id="update-fallback" hidden></p>
+        {% else %}
+        <p class="field-hint">Vantage is up to date.</p>
+        {% endif %}
+    </div>
+</section>
 {% endblock %}
 
 {% block scripts %}

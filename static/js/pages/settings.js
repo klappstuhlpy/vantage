@@ -20,6 +20,25 @@ function intOrNull(id) {
   return Number.isFinite(n) ? Math.trunc(n) : null;
 }
 
+/* The update button is a one-off action, not an override that saves with the
+ * form. A refusal (409) is an expected answer — it carries the command to run
+ * by hand — so it is written into the card instead of only flashing in a toast.
+ */
+document.getElementById('apply-update-btn')?.addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  const fallback = document.getElementById('update-fallback');
+  try {
+    const res = await withLoading(btn, () => post('/updates/apply'), { errorTitle: "Couldn't update" });
+    btn.disabled = true;
+    toastOk('Update started', res.note || 'Vantage is restarting into the new version.');
+  } catch (err) {
+    if (fallback) {
+      fallback.textContent = err.message;
+      fallback.hidden = false;
+    }
+  }
+});
+
 form?.addEventListener('submit', async (e) => {
   e.preventDefault();
   const body = {
