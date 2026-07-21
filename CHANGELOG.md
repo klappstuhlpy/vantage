@@ -10,6 +10,16 @@ fixes and polish.
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-07-21
+
+### Fixed
+
+- **In-place updates start again.** The "Update now" button failed with `stat ./vantage: no such file or directory`: the update helper ran the new image with the project directory as its working directory, so the relative path to Vantage's own binary no longer resolved. It now calls the binary by its absolute path in the image. A deployment already running the broken version cannot update itself out of it — pull once by hand (`docker compose pull vantage && docker compose up -d --no-deps vantage`) to land a fixed build, after which the button works.
+
+### Changed
+
+- **Release notes on the Version card render as formatted markdown.** The update card showed the GitHub release body as a raw monospace block; it now renders the headings, lists, bold, code and links it contains. The markdown is escaped before rendering and only known-safe tags are emitted, so nothing in a release body can inject markup.
+
 ## [0.6.1] - 2026-07-21
 
 ### Changed

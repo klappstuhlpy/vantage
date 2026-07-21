@@ -19,6 +19,12 @@ use super::Deployment;
 /// HTTP.
 const IMAGE_REPO: &str = "ghcr.io/klappstuhlpy/vantage";
 
+/// Absolute path to the binary inside the image. It must be absolute: the helper
+/// does not set `--workdir`, and even if it did, a relative `./vantage` would
+/// resolve against the wrong directory. Pinned to the image's `WORKDIR /app`
+/// (see the Dockerfile) — change both together.
+const BINARY: &str = "/app/vantage";
+
 /// The two compose commands, in order, both scoped to the one service.
 ///
 /// `--no-deps` is load-bearing: an unscoped `compose up` recreates every
@@ -53,7 +59,11 @@ pub async fn launch(d: &Deployment, version: &str) -> anyhow::Result<()> {
     }
 
     // The project directory is mounted at the same path inside the helper so
-    // compose resolves the file's relative paths identically to the host.
+    // compose resolves the file's relative paths identically to the host. The
+    // container's own workdir is left at the image default (`/app`, where the
+    // binary is) — `run()` cd's into the project dir itself for the compose
+    // commands, so it must not be overridden here or the absolute `BINARY` would
+    // be the only thing that still resolves.
     let mount = format!("{0}:{0}", d.project_dir);
     let out = HostCommand::new(Tool::Docker)
         .args([
@@ -64,10 +74,8 @@ pub async fn launch(d: &Deployment, version: &str) -> anyhow::Result<()> {
             "/var/run/docker.sock:/var/run/docker.sock",
             "--volume",
             mount.as_str(),
-            "--workdir",
-            d.project_dir.as_str(),
             image.as_str(),
-            "./vantage",
+            BINARY,
             "apply-update",
             d.project_dir.as_str(),
             d.service.as_str(),
@@ -132,5 +140,13 @@ mod tests {
         // rule the releases URL follows.
         assert_eq!(image_for("0.5.0"), "ghcr.io/klappstuhlpy/vantage:0.5.0");
         assert!(image_for("0.5.0").starts_with(IMAGE_REPO));
+    }
+
+    #[test]
+    fn the_binary_path_is_absolute() {
+        // A relative `./vantage` broke every update: the helper runs with no
+        // `--workdir`, so the exec resolves against the container's cwd. Absolute
+        // is the fix — keep it that way.
+        assert!(BINARY.starts_with('/'), "the helper binary must be an absolute path");
     }
 }

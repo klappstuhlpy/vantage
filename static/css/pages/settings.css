@@ -31,9 +31,9 @@
     gap: var(--sp-4);
   }
 
-  /* Release notes arrive as markdown. Rendering them properly would mean
-     shipping a parser for one card; a monospace block is honest and readable,
-     and the "Release notes" link goes to the formatted version. */
+  /* Release notes arrive as markdown. settings.js renders a safe subset into
+     this box (headings, lists, bold, code, links); before JS runs, or if it is
+     off, the same box shows the raw markdown as wrapped text — still readable. */
   .release-notes {
     max-height: 220px;
     overflow: auto;
@@ -45,5 +45,57 @@
     font-size: var(--fs-sm);
     white-space: pre-wrap;
     color: var(--ink-2);
+  }
+
+  /* Once rendered, it is real block markup, not preformatted text. */
+  .release-notes.md {
+    white-space: normal;
+  }
+
+  .release-notes.md > :first-child {
+    margin-top: 0;
+  }
+
+  .release-notes.md > :last-child {
+    margin-bottom: 0;
+  }
+
+  .release-notes.md h4,
+  .release-notes.md h5,
+  .release-notes.md h6 {
+    margin: var(--sp-3) 0 var(--sp-1);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    color: var(--ink-1);
+  }
+
+  .release-notes.md p {
+    margin: var(--sp-2) 0;
+  }
+
+  .release-notes.md ul {
+    margin: var(--sp-2) 0;
+    padding-left: var(--sp-4);
+  }
+
+  .release-notes.md li {
+    margin: var(--sp-1) 0;
+  }
+
+  .release-notes.md code {
+    padding: 0.1em 0.35em;
+    background: var(--bg-3);
+    border-radius: var(--r-s);
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+  }
+
+  .release-notes.md strong {
+    color: var(--ink-1);
+    font-weight: 600;
+  }
+
+  .release-notes.md a {
+    color: var(--acc);
   }
 }

@@ -157,8 +157,8 @@ struct SettingsTemplate {
     backup_interval_hours: String,
     backup_interval_default: u64,
     /// The self-update card. `update_notes` is the release body as markdown;
-    /// Askama escapes it and the page renders it as preformatted text rather
-    /// than shipping a markdown parser for one card.
+    /// Askama escapes it into the page and settings.js renders a safe subset
+    /// (escape-first, our tags only) — no server-side parser for one card.
     current_version: &'static str,
     update_available: bool,
     update_version: String,

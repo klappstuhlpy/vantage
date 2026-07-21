@@ -108,7 +108,12 @@
             <strong>{{ update_version }}</strong> is available{% if update_published != "" %} · published {{ update_published }}{% endif %}
         </p>
         {% if update_notes != "" %}
-        <pre class="release-notes">{{ update_notes }}</pre>
+        {#
+            The raw markdown lands here as escaped text — readable on its own if
+            JS is off. settings.js reads it back via textContent (which decodes
+            the escaping) and renders the markdown subset our release notes use.
+        #}
+        <div class="release-notes" id="release-notes">{{ update_notes }}</div>
         {% endif %}
         <div class="settings-actions">
             <button class="btn" type="button" id="apply-update-btn">Update now</button>
