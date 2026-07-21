@@ -16,10 +16,9 @@
 //! `metrics` topic — the hub's **first real publisher**. A second task
 //! ([`spawn_pruner`]) trims samples older than 30 days hourly.
 //!
-//! **Threshold alerts are deferred**: the monolith's `alerts` sub-module fires a
-//! Discord webhook via the alert-sink Seam (`has_any_alert_sink`/`send_alert`),
-//! which lands in Vantage with the alerts slice — `scrape_once` will call it
-//! then.
+//! **Threshold alerts**: `scrape_once` feeds each sample through the
+//! `thresholds` state machine and fires `AppState::send_alert` for every
+//! breach — thresholds come from `config.alerts.{cpu,mem,disk}_alert_pct`.
 
 pub mod docker;
 mod host;
@@ -51,9 +50,13 @@ pub fn spawn_collector(state: AppState) {
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         interval.tick().await; // consume the immediate tick
 
+        // Threshold alert state lives with the loop — see `thresholds` module
+        // docs for the fire/re-arm rules and the restart caveat.
+        let mut thresholds = thresholds::ThresholdState::default();
+
         loop {
             interval.tick().await;
-            if let Err(e) = scrape_once(&state).await {
+            if let Err(e) = scrape_once(&state, &mut thresholds).await {
                 error!(error = %e, "metrics scrape failed");
             }
         }
@@ -74,7 +77,7 @@ pub fn spawn_pruner(state: AppState) {
     });
 }
 
-async fn scrape_once(state: &AppState) -> anyhow::Result<()> {
+async fn scrape_once(state: &AppState, thresholds: &mut thresholds::ThresholdState) -> anyhow::Result<()> {
     // Heartbeat so every scrape attempt is visible in the log file. Debug level
     // since it fires every SCRAPE_INTERVAL and would otherwise spam the log.
     debug!(target: "metrics", "scrape: starting");
@@ -95,6 +98,25 @@ async fn scrape_once(state: &AppState) -> anyhow::Result<()> {
 
     storage::insert_sample(&state.db, ts, &sample).await?;
     storage::insert_docker_stats(&state.db, ts, &containers).await?;
+
+    for breach in thresholds.observe(
+        sample.cpu_total_pct(),
+        sample.mem_used_pct(),
+        sample.disk_used_pct(),
+        &state.config.alerts,
+    ) {
+        state.send_alert(serde_json::json!({
+            "username": "vantage",
+            "embeds": [{
+                "title": format!("\u{1f4c8} {} over threshold", breach.label),
+                "description": format!(
+                    "{} has been at or above {:.0}% for ~90 s — currently {:.1}%.",
+                    breach.label, breach.threshold, breach.value
+                ),
+                "color": 0xef4444u32,
+            }]
+        }));
+    }
 
     // Push to /ws subscribers so live dashboards refresh without polling. We ship
     // a compact subset — enough for the tile row + container table. Charts still
