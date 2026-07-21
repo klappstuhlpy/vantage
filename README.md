@@ -1,6 +1,25 @@
-# Vantage
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="static/assets/white/logo_bare_white.png"/>
+    <source media="(prefers-color-scheme: light)" srcset="static/assets/black/logo_bare_black.png"/>
+    <img src="static/assets/white/logo_transparent_white.png" alt="Vantage Logo" width="120"/>
+  </picture>
+</p>
 
-A security-first VPS/homelab control plane. Manage your server through a terminal-aesthetic web UI, backed by a CLI.
+<p align="center">
+  <a href="https://github.com/klappstuhlpy/vantage/releases/latest"><img src="https://img.shields.io/github/v/release/klappstuhlpy/vantage?style=flat-square&color=3fb950" alt="Release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/klappstuhlpy/vantage?style=flat-square&color=3fb950" alt="License"></a>
+  <img src="https://img.shields.io/badge/rust-1.74%2B-e6edf3?style=flat-square&logo=rust&logoColor=e6edf3" alt="Rust 1.74+">
+  <a href="https://ghcr.io/klappstuhlpy/vantage"><img src="https://img.shields.io/badge/ghcr.io-klappstuhlpy%2Fvantage-3fb950?style=flat-square&logo=docker&logoColor=white" alt="Container"></a>
+  <img src="https://img.shields.io/badge/platform-linux%20%7C%20amd64%20%7C%20arm64-7d8590?style=flat-square" alt="Platform">
+</p>
+
+<p align="center">
+  A security-first VPS/homelab control plane.<br>
+  Manage your server through a terminal-aesthetic web UI, backed by a CLI.
+</p>
+
+---
 
 Vantage gives you a single pane of glass over Docker containers, firewall rules, uptime probes, host metrics, SSL certificates, secrets scanning, SSH keys, scheduled scripts, reverse proxy config, and database backups — all behind a hardened auth stack with fail-closed network exposure.
 
@@ -26,6 +45,28 @@ Vantage gives you a single pane of glass over Docker containers, firewall rules,
 - **Revert-timer apply** — firewall/proxy changes auto-roll-back unless confirmed within a timeout window; dry-run diff preview before apply
 - **Security headers** — strict CSP (`'self'` only, no inline/eval), X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy on every response
 - **Live updates** — WebSocket hub with subscribe/unsubscribe protocol for real-time dashboard tiles
+
+## Screenshots
+
+<p align="center">
+  <img src="static/assets/home.png" alt="Dashboard home" width="720"/><br>
+  <sub>Dashboard — host metrics, containers, and uptime at a glance</sub>
+</p>
+
+<p align="center">
+  <img src="static/assets/firewall.png" alt="Firewall rules" width="720"/><br>
+  <sub>Firewall — rule mirror with backend auto-detection</sub>
+</p>
+
+<p align="center">
+  <img src="static/assets/database.png" alt="Database console" width="720"/><br>
+  <sub>Database console — query SQLite and PostgreSQL with safety guard</sub>
+</p>
+
+<p align="center">
+  <img src="static/assets/alerts.png" alt="Alert delivery" width="720"/><br>
+  <sub>Alerts — multi-sink delivery with delivery history</sub>
+</p>
 
 ## Security Model
 

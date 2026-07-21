@@ -48,9 +48,22 @@
                 subject of the controls beside it, so it keeps a real alt text.
             #}
             <div class="profile-picture">
+                {% match account %}
+                {% when Some with (acct) %}
+                {% if acct.has_avatar() %}
+                <img id="avatar-preview" class="avatar-lg" alt="Your profile picture"
+                     src="/account/avatar">
+                <span id="avatar-initial" class="avatar-lg" aria-hidden="true" hidden></span>
+                {% else %}
                 <img id="avatar-preview" class="avatar-lg" alt="Your profile picture"
                      src="/account/avatar" hidden>
-                <span id="avatar-initial" class="avatar-lg" aria-hidden="true" hidden></span>
+                <span id="avatar-initial" class="avatar-lg" aria-hidden="true">{{ acct.initial() }}</span>
+                {% endif %}
+                {% when None %}
+                <img id="avatar-preview" class="avatar-lg" alt="Your profile picture"
+                     src="/account/avatar" hidden>
+                <span id="avatar-initial" class="avatar-lg" aria-hidden="true">?</span>
+                {% endmatch %}
                 <div class="profile-picture-actions">
                     {#
                         A bare file input is styled inconsistently across browsers
@@ -61,7 +74,8 @@
                     <input type="file" id="avatar-input" accept="image/png,image/jpeg,image/webp"
                            class="sr-only" aria-label="Choose a profile picture">
                     <button class="btn ghost" type="button" id="avatar-choose">Change picture</button>
-                    <button class="btn ghost danger" type="button" id="avatar-remove" hidden>Remove</button>
+                    <button class="btn ghost danger" type="button" id="avatar-remove"
+                            {% match account %}{% when Some with (acct) %}{% if !acct.has_avatar() %} hidden{% endif %}{% when None %} hidden{% endmatch %}>Remove</button>
                 </div>
                 <span class="field-hint">PNG, JPEG or WebP, up to {{ max_avatar_kb }} KB.</span>
                 <span class="field-error" id="avatar-error" hidden></span>

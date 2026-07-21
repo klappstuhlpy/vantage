@@ -29,26 +29,10 @@
     color: var(--acc);
   }
 
-  .status-brand .scope {
+  .status-brand .brand-logo {
     width: 20px;
     height: 20px;
-  }
-
-  .status-brand .scope-ring {
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.5;
-    opacity: 0.9;
-  }
-
-  .status-brand .scope-grid {
-    stroke: currentColor;
-    stroke-width: 1;
-    opacity: 0.35;
-  }
-
-  .status-brand .scope-dot {
-    fill: currentColor;
+    object-fit: contain;
   }
 
   .status-brand-name {

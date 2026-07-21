@@ -45,7 +45,8 @@
             follows the theme. The label carries the wordmark baked into the
             artwork, since a screen reader gets nothing from the image itself.
         #}
-        <div class="auth-brand" role="img" aria-label="Vantage"></div>
+        <img class="auth-brand auth-brand--dark" src="/static/assets/white/logo_transparent_white_small.png" alt="Vantage Logo" aria-hidden="true"/>
+        <img class="auth-brand auth-brand--light" src="/static/assets/black/logo_transparent_black_small.png" alt="Vantage Logo" aria-hidden="true"/>
 
         <h1 class="auth-title">{% block heading %}Sign in{% endblock %}</h1>
         <p class="auth-intro">{% block intro %}{% endblock %}</p>

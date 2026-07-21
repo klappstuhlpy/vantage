@@ -10,6 +10,15 @@ fixes and polish.
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-07-21
+
+### Changed
+
+- **Brand artwork is now a proper logo.** The sidebar, login page, and status page show the real Vantage logo (theme-aware dark/light variants) instead of the old inline SVG scope icon and CSS-mask placeholder. The generated `build_logo.py` script is removed.
+- **README shows screenshots and a centered header.** The project README gains a proper logo header with badges and four captioned screenshots (dashboard, firewall, database console, alerts).
+- **Account settings show an avatar placeholder immediately.** When no profile picture is set, the settings page renders the first-letter initial server-side (matching the sidebar) instead of briefly hiding the avatar area while JavaScript decides.
+- **New favicon.**
+
 ## [0.6.2] - 2026-07-21
 
 ### Fixed

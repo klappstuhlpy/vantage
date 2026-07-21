@@ -57,19 +57,8 @@
 <div class="app">
     <aside class="sidebar" id="sidebar" aria-label="Sections">
         <a class="brand" href="/">
-            {#
-                The scope is the brand mark and the live indicator at once: the
-                sweep is driven by [data-live] on <html> (see shell.css), which
-                core/live.js sets from the real socket state. It animates only
-                while we are genuinely connected.
-            #}
-            <svg class="scope" viewBox="0 0 24 24" aria-hidden="true">
-                <circle class="scope-ring" cx="12" cy="12" r="9"/>
-                <circle class="scope-grid" cx="12" cy="12" r="5" fill="none"/>
-                <path class="scope-grid" d="M12 3v18M3 12h18" fill="none"/>
-                <path class="scope-sweep" d="M12 12 L12 3 A9 9 0 0 1 20.5 9 Z"/>
-                <circle class="scope-dot" cx="12" cy="12" r="1.5"/>
-            </svg>
+            <img class="brand-logo brand-logo--dark" src="/static/assets/white/logo_bare_white.png" alt="" aria-hidden="true" width="24" height="24"/>
+            <img class="brand-logo brand-logo--light" src="/static/assets/black/logo_bare_black.png" alt="" aria-hidden="true" width="24" height="24"/>
             <span class="brand-name">Vantage</span>
         </a>
 

@@ -98,6 +98,16 @@
     color: var(--ink-1);
   }
 
+  .brand-logo {
+    width: 24px;
+    height: 24px;
+    flex: none;
+    object-fit: contain;
+  }
+
+  [data-theme="light"] .brand-logo--dark { display: none; }
+  [data-theme="dark"] .brand-logo--light { display: none; }
+
   .brand-name {
     font-family: var(--font-mono);
     font-size: var(--fs-md);

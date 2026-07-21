@@ -45,14 +45,10 @@
     margin-bottom: 1rem;
     align-self: center;
     width: 100px;
-    /* Matches logo-mask.png's intrinsic size; `build_logo.py` prints this line
-       when it regenerates the mask, since a mask has no intrinsic ratio to
-       inherit and a stale value letterboxes the artwork. */
-    aspect-ratio: 512 / 436;
-    background: var(--ink-1);
-    -webkit-mask: url('/static/icons/logo-mask.png') no-repeat center / contain;
-    mask: url('/static/icons/logo-mask.png') no-repeat center / contain;
   }
+
+  [data-theme="light"] .auth-brand--dark { display: none; }
+  [data-theme="dark"] .auth-brand--light { display: none; }
 
   .auth-title {
     margin: 0;
