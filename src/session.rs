@@ -57,6 +57,27 @@ pub struct Account {
     pub ip: Option<String>,
 }
 
+/// The client address to attribute an action to. Normally the direct TCP peer,
+/// which cannot be spoofed. **Only** when that peer is loopback — the tell that a
+/// reverse proxy on the same host is in front (the very config `proxy/render.rs`
+/// generates, which sets `X-Real-IP`/`X-Forwarded-For`) — do we fall back to a
+/// forwarded header for the real client. A remote client's peer is never
+/// loopback, so it can never reach this path to spoof its audited address; and
+/// the allowlist guard (`crate::guard`) still reads the raw peer regardless.
+fn client_ip(peer: std::net::IpAddr, headers: &axum::http::HeaderMap) -> String {
+    if peer.is_loopback() {
+        for name in ["cf-connecting-ip", "x-real-ip", "x-forwarded-for"] {
+            if let Some(v) = headers.get(name).and_then(|h| h.to_str().ok()) {
+                // X-Forwarded-For is a list, "client, proxy1, proxy2"; the client is first.
+                if let Some(first) = v.split(',').next().map(str::trim).filter(|s| !s.is_empty()) {
+                    return first.to_string();
+                }
+            }
+        }
+    }
+    peer.to_string()
+}
+
 impl Account {
     /// Whether the admin flag (bit 0) is set. Every Vantage account is a host
     /// admin today; the flag is kept for wire-compatibility with the site.
@@ -237,7 +258,7 @@ impl FromRequestParts<AppState> for Account {
         account.ip = parts
             .extensions
             .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
-            .map(|ConnectInfo(peer)| peer.ip().to_string());
+            .map(|ConnectInfo(peer)| client_ip(peer.ip(), &parts.headers));
         // The session list is only worth showing if "last seen" is true, and the
         // only place that knows a session was just used is right here. Rate-limited
         // to one write a minute inside the helper, and best-effort: failing to

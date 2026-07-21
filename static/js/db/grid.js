@@ -141,6 +141,7 @@ export function createGrid(root, opts = {}) {
             else selectRows(0, rows.length - 1);
             paintHead();
             paint(true);
+            opts.onSelectionChange?.();
           },
         },
         h('span', { class: 'dbgrid-corner-mark', 'aria-hidden': 'true' })

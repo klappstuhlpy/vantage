@@ -74,6 +74,11 @@
   html {
     -webkit-text-size-adjust: 100%;
     tab-size: 4;
+    /* The root paints the canvas. Without this the app's dark bg lives only on
+       `body`, whose fixed 100dvh height + `overflow:hidden` (shell.css) leaves
+       the area exposed when a phone pinch-zooms out painted the browser
+       default — a blank band under the frame. */
+    background: var(--bg-0);
     /* No document-level rubber-band. The app frame is a fixed 100dvh box that
        owns its own scrolling; letting the root overscroll on top of it is what
        slid the whole page up and left a blank band at the bottom. Standalone
