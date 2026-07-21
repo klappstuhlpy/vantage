@@ -421,6 +421,10 @@
     opacity: 1;
   }
 
+  .table td.actions .btn-row.pinned {
+    opacity: 1;
+  }
+
   @media (hover: none) {
     .table td.actions .btn-row {
       opacity: 1;
