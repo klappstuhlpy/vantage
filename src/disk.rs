@@ -132,16 +132,30 @@ async fn dir_usage(path: &str) -> DirUsage {
         Ok(Ok(o)) if o.status.success() => {
             // `du -s` prints "<bytes>\t<path>"; the size is the first field.
             let out = String::from_utf8_lossy(&o.stdout);
-            (out.split_whitespace().next().and_then(|n| n.parse().ok()), String::new())
+            (
+                out.split_whitespace().next().and_then(|n| n.parse().ok()),
+                String::new(),
+            )
         }
         Ok(Ok(o)) => {
             let err = String::from_utf8_lossy(&o.stderr).trim().to_string();
-            (None, if err.is_empty() { "du reported a failure".into() } else { err })
+            (
+                None,
+                if err.is_empty() {
+                    "du reported a failure".into()
+                } else {
+                    err
+                },
+            )
         }
         Ok(Err(e)) => (None, e.to_string()),
         Err(_) => (None, "timed out".into()),
     };
-    DirUsage { path: path.to_string(), bytes, note }
+    DirUsage {
+        path: path.to_string(),
+        bytes,
+        note,
+    }
 }
 
 /// Every configured directory's size, measured concurrently.
