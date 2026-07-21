@@ -10,6 +10,8 @@ fixes and polish.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-21
+
 ### Added
 
 - **Vantage alerts you when the box runs hot or full.** The alert sinks now fire when CPU, memory or disk stays at or above a configurable threshold (default 90%) for about 90 seconds — one alert per excursion, re-armed only once the metric falls clearly below the line, so a value hovering at the threshold cannot flood your sinks. Set `alerts.cpu_alert_pct`, `alerts.mem_alert_pct` or `alerts.disk_alert_pct` in `config.json` to tune, or `0` to turn one off.
