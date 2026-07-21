@@ -46,7 +46,7 @@ fn default_smtp_port() -> u16 {
 
 /// Multi-sink alert delivery configuration. All four sinks are optional and
 /// fire in parallel; a missing key disables that sink.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AlertsConfig {
     /// Discord webhook URL (receives the raw Discord-shaped JSON payload).
     #[serde(default)]
@@ -60,6 +60,29 @@ pub struct AlertsConfig {
     /// SMTP email sink configuration.
     #[serde(default)]
     pub email: Option<EmailConfig>,
+    /// Alert when host CPU stays at or above this percentage for ~90 s.
+    /// 0 disables. See `metrics::thresholds` for the exact fire/re-arm rules.
+    #[serde(default = "default_metric_threshold")]
+    pub cpu_alert_pct: f64,
+    /// Alert when memory usage stays at or above this percentage for ~90 s. 0 disables.
+    #[serde(default = "default_metric_threshold")]
+    pub mem_alert_pct: f64,
+    /// Alert when root-filesystem usage stays at or above this percentage for ~90 s. 0 disables.
+    #[serde(default = "default_metric_threshold")]
+    pub disk_alert_pct: f64,
+}
+
+fn default_metric_threshold() -> f64 {
+    90.0
+}
+
+// Manual impl so the programmatic default (first-run config generation,
+// `Config::test_default`) matches the serde default — a derived `Default`
+// would zero the thresholds and silently disable metric alerts.
+impl Default for AlertsConfig {
+    fn default() -> Self {
+        serde_json::from_str("{}").expect("empty AlertsConfig deserializes")
+    }
 }
 
 /// A pre-defined operator script that can be run on demand from the Ctrl+K
@@ -955,5 +978,18 @@ mod tests {
     fn cidr_rejects_oversized_prefix() {
         assert!(IpCidr::parse("10.0.0.0/33").is_err());
         assert!(IpCidr::parse("::/129").is_err());
+    }
+
+    #[test]
+    fn alert_thresholds_default_to_90_from_both_paths() {
+        // Programmatic default (first-run config generation, test_default).
+        let d = AlertsConfig::default();
+        assert_eq!((d.cpu_alert_pct, d.mem_alert_pct, d.disk_alert_pct), (90.0, 90.0, 90.0));
+        // Serde default (an existing config.json with no threshold keys).
+        let parsed: AlertsConfig = serde_json::from_str("{}").unwrap();
+        assert_eq!(
+            (parsed.cpu_alert_pct, parsed.mem_alert_pct, parsed.disk_alert_pct),
+            (90.0, 90.0, 90.0)
+        );
     }
 }
