@@ -9,6 +9,7 @@
 use crate::{health, proxy, session::Account, AppState};
 use askama::Template;
 use axum::{extract::State, http::StatusCode, routing::get, Router};
+use rusqlite::OptionalExtension;
 
 struct RouteCertView {
     subdomain: String,
@@ -121,6 +122,96 @@ pub fn routes() -> Router<AppState> {
     Router::new().route("/certs", get(page))
 }
 
+// ─── Expiry alerting ─────────────────────────────────────────────────────────
+
+/// Expiry milestones in days, widest first. An alert fires the first time a
+/// certificate crosses each one, so one renewal cycle produces at most four
+/// notifications per monitor rather than one per probe.
+///
+/// `0` is its own rung rather than folded into `1`: the day a certificate lapses
+/// is a different event from the day before it does.
+const EXPIRY_THRESHOLDS: [i64; 4] = [14, 7, 1, 0];
+
+/// The tightest milestone `days` has crossed, or `None` while the certificate is
+/// still outside the widest one.
+fn crossed_threshold(days: i64) -> Option<i64> {
+    EXPIRY_THRESHOLDS.into_iter().filter(|t| days <= *t).min()
+}
+
+/// Records an SSL probe's days-to-expiry and alerts the first time it crosses a
+/// milestone in [`EXPIRY_THRESHOLDS`].
+///
+/// Called from the health probe loop for every `ssl` monitor, so it runs as
+/// often as that target's interval — hence the `cert_alert_state` ladder, which
+/// is what keeps this from being one notification per probe.
+pub async fn note_expiry(state: &AppState, target: &health::HealthTarget, days: i64) {
+    // Nowhere to send it. Leave the ladder untouched rather than recording a
+    // notification that never happened, so configuring a sink later still
+    // reports a certificate that is already inside a threshold.
+    if !state.has_any_alert_sink() {
+        return;
+    }
+
+    let id = target.id;
+    let previous: Option<i64> = state
+        .database()
+        .call(move |conn| -> rusqlite::Result<Option<i64>> {
+            conn.query_row(
+                "SELECT threshold FROM cert_alert_state WHERE target_id = ?",
+                [id],
+                |r| r.get(0),
+            )
+            .optional()
+        })
+        .await
+        .unwrap_or(None);
+
+    let Some(threshold) = crossed_threshold(days) else {
+        // Renewed — drop the row so every rung re-arms for the next cycle.
+        if previous.is_some() {
+            let _ = state
+                .database()
+                .execute("DELETE FROM cert_alert_state WHERE target_id = ?", (id,))
+                .await;
+        }
+        return;
+    };
+
+    // Only ever escalate: equal means this rung was already reported, and a
+    // larger number means the certificate moved *away* from expiry without
+    // clearing the ladder (a shorter replacement cert), which is not an alert.
+    if previous.is_some_and(|p| threshold >= p) {
+        return;
+    }
+
+    // Record before sending. If the write fails the next probe would alert
+    // again, which is precisely what this table exists to prevent.
+    if let Err(e) = state
+        .database()
+        .execute(
+            "INSERT INTO cert_alert_state (target_id, threshold) VALUES (?, ?)
+             ON CONFLICT(target_id) DO UPDATE SET threshold = excluded.threshold,
+                 notified_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')",
+            (id, threshold),
+        )
+        .await
+    {
+        tracing::error!(target_id = id, error = %e, "certs: recording expiry alert state failed");
+        return;
+    }
+
+    let host = host_of(&target.target);
+    state.send_alert(serde_json::json!({
+        "username": "vantage",
+        "embeds": [{
+            "title": format!("\u{1f512} TLS certificate {}", if days <= 0 { "expired" } else { "expiring soon" }),
+            "description": format!("`{host}` — {}.", cert_label(Some(days))),
+            "color": if days <= 7 { 0xef4444u32 } else { 0xf59e0bu32 },
+            "fields": [{ "name": "Monitor", "value": target.name.clone(), "inline": true }],
+        }]
+    }));
+}
+
 /// The countdown as an operator would say it.
 ///
 /// Lives here rather than in the template because a negative day count is not
@@ -199,6 +290,43 @@ mod tests {
         // The regression this exists for: never render "-5 days".
         assert_eq!(cert_label(Some(-5)), "expired 5 days ago");
         assert_eq!(cert_label(None), "—");
+    }
+
+    #[test]
+    fn crossed_threshold_picks_the_tightest_rung() {
+        // Outside the widest milestone — nothing to say yet.
+        assert_eq!(crossed_threshold(90), None);
+        assert_eq!(crossed_threshold(15), None);
+        // Each boundary is inclusive, and only the tightest rung crossed counts.
+        assert_eq!(crossed_threshold(14), Some(14));
+        assert_eq!(crossed_threshold(8), Some(14));
+        assert_eq!(crossed_threshold(7), Some(7));
+        assert_eq!(crossed_threshold(2), Some(7));
+        assert_eq!(crossed_threshold(1), Some(1));
+        // Expired is its own rung, and stays there however long it has lapsed.
+        assert_eq!(crossed_threshold(0), Some(0));
+        assert_eq!(crossed_threshold(-30), Some(0));
+    }
+
+    #[test]
+    fn expiry_alerts_only_escalate() {
+        // The property `note_expiry` relies on: walking a certificate down to
+        // expiry visits each rung once, so a monitor probing every 60 seconds
+        // sends four notifications per renewal cycle, not one per probe.
+        let mut previous: Option<i64> = None;
+        let mut sent = Vec::new();
+        for days in (0..=30).rev() {
+            if let Some(t) = crossed_threshold(days) {
+                if !previous.is_some_and(|p| t >= p) {
+                    sent.push(t);
+                    previous = Some(t);
+                }
+            }
+        }
+        assert_eq!(sent, vec![14, 7, 1, 0]);
+
+        // A renewal clears the ladder, and the next cycle alerts again.
+        assert_eq!(crossed_threshold(89), None);
     }
 
     #[test]

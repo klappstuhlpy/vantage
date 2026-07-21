@@ -1,0 +1,71 @@
+{% extends "layout.html" %}
+
+{% block title %}Units | Vantage{% endblock %}
+
+
+{% block content %}
+<div class="page-head">
+    <div class="page-head-text">
+        <h1>Units</h1>
+        <p class="page-sub">
+            The systemd units you asked Vantage to watch — what state they are in, and the
+            three verbs that change it.
+        </p>
+    </div>
+</div>
+
+<noscript>
+    <div class="callout warn">
+        <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#triangle-alert"/></svg>
+        <div class="callout-body">This page needs JavaScript to read unit state and act on it.</div>
+    </div>
+</noscript>
+
+{% if !any_units %}
+{#
+    Nothing to list, so the page's whole job is to explain what would fill it —
+    and, more importantly, that the list is the boundary rather than a display
+    filter. An operator who assumes this page can reach any unit on the box will
+    configure it wrong.
+#}
+<div class="callout">
+    <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#info"/></svg>
+    <div class="callout-body">
+        <strong>No units are configured.</strong>
+        Units are declared under <code>systemd_units</code> in <code>config.json</code>. The list is
+        the boundary, not a filter: a unit that is not named here cannot be started, stopped, or
+        restarted from this page at all.
+        <pre class="config-example"><code>"systemd_units": [
+  "nginx.service",
+  "docker.service"
+]</code></pre>
+    </div>
+</div>
+{% else %}
+<section class="card">
+    <div class="table-wrap">
+        <table class="table" id="units-table">
+            <thead>
+                <tr>
+                    <th>Unit</th>
+                    <th>State</th>
+                    <th>Boot</th>
+                    <th>Since</th>
+                    <th class="actions">Actions</th>
+                </tr>
+            </thead>
+            <tbody id="units-body"></tbody>
+        </table>
+    </div>
+</section>
+<p class="section-note">
+    Start, stop and restart act now. Whether a unit comes back after a reboot is its
+    <code>enabled</code>/<code>disabled</code> state, which this page reports but deliberately
+    does not change.
+</p>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/js/pages/systemd.js"></script>
+{% endblock %}

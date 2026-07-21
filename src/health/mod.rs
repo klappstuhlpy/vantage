@@ -134,6 +134,14 @@ pub async fn run_check_now(state: &AppState, target_id: i64) -> anyhow::Result<C
     let outcome = checker::run(&target, &state.client).await;
 
     storage::record_sample(state, target_id, &outcome).await?;
+
+    // An `ssl` probe is the only place the box learns a certificate's remaining
+    // life, so the expiry ladder is driven from here rather than from a second
+    // timer that would have to re-probe the same endpoint to find out.
+    if let Some(days) = outcome.ssl_days_left {
+        crate::certs::note_expiry(state, &target, days).await;
+    }
+
     let prev_open = storage::get_open_incident(state, target_id).await?;
 
     match (&outcome.status, prev_open) {

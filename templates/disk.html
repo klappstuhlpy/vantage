@@ -1,0 +1,87 @@
+{% extends "layout.html" %}
+
+{% block title %}Disk | Vantage{% endblock %}
+
+{% block content %}
+<div class="page-head">
+    <div class="page-head-text">
+        <h1>Disk</h1>
+        <p class="page-sub">
+            Every mounted filesystem and how full it is, plus the size of the directories
+            you asked Vantage to keep an eye on.
+        </p>
+    </div>
+</div>
+
+<noscript>
+    <div class="callout warn">
+        <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#triangle-alert"/></svg>
+        <div class="callout-body">This page needs JavaScript to read disk usage.</div>
+    </div>
+</noscript>
+
+<div class="section-head">
+    <h2>Filesystems</h2>
+</div>
+<section class="card">
+    <div class="table-wrap">
+        <table class="table" id="fs-table">
+            <thead>
+                <tr>
+                    <th>Filesystem</th>
+                    <th>Mounted on</th>
+                    <th class="num">Size</th>
+                    <th class="num">Used</th>
+                    <th class="num">Available</th>
+                    <th>Full</th>
+                </tr>
+            </thead>
+            <tbody id="fs-body"></tbody>
+        </table>
+    </div>
+</section>
+<p class="section-note">From <code>df</code>. Every mount the host reports, fullest first.</p>
+
+{% if !any_dirs %}
+{#
+    No directories configured, so this card's job is to explain what would fill
+    it — and that the list is the boundary, not a display filter. `du` walks a
+    tree, so which trees it may walk is config, never request input.
+#}
+<div class="callout">
+    <svg class="icon" aria-hidden="true"><use href="/static/icons/sprite.svg#info"/></svg>
+    <div class="callout-body">
+        <strong>No directories are watched.</strong>
+        List directories under <code>disk_paths</code> in <code>config.json</code> to measure them
+        with <code>du</code>. The list is the boundary, not a filter: a path that is not named here
+        cannot be measured from this page — there is no field that takes one.
+        <pre class="config-example"><code>"disk_paths": [
+  "/var/lib/docker",
+  "/home"
+]</code></pre>
+    </div>
+</div>
+{% else %}
+<div class="section-head">
+    <h2>Watched directories</h2>
+</div>
+<section class="card">
+    <div class="table-wrap">
+        <table class="table" id="dirs-table">
+            <thead>
+                <tr>
+                    <th>Path</th>
+                    <th class="num">Size</th>
+                </tr>
+            </thead>
+            <tbody id="dirs-body"></tbody>
+        </table>
+    </div>
+</section>
+<p class="section-note">From <code>du</code>. Total size on disk of each configured path.</p>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/js/pages/disk.js"></script>
+{% endblock %}

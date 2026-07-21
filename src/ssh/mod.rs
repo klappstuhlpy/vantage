@@ -607,6 +607,36 @@ fn parse_publickey_accept(line: &str) -> Option<ParsedAccept<'_>> {
     })
 }
 
+/// A failed SSH auth attempt — the user sshd was tried against and the client IP.
+#[derive(Debug, PartialEq, Eq)]
+struct ParsedFailure<'a> {
+    /// The account name the attempt targeted. `invalid user X` is normalised to `X`.
+    user: &'a str,
+    /// Client IP the attempt came from.
+    ip: &'a str,
+}
+
+/// Parse one sshd log line as a failed authentication. Returns the target user
+/// and client IP iff the line is a `Failed <method> for …` record.
+///
+/// Covers the dominant failure shapes:
+///   `Failed password for root from 1.2.3.4 port 22 ssh2`
+///   `Failed password for invalid user admin from 1.2.3.4 port 22 ssh2`
+///   `Failed publickey for root from 1.2.3.4 port 22 ssh2: …`
+fn parse_auth_failure(line: &str) -> Option<ParsedFailure<'_>> {
+    let idx = line.find("Failed ")?;
+    let rest = &line[idx + "Failed ".len()..];
+    // `<method> for [invalid user ]<user> from <ip> port <n> …`
+    let (_method, rest) = rest.split_once(" for ")?;
+    let rest = rest.strip_prefix("invalid user ").unwrap_or(rest);
+    let (user, rest) = rest.split_once(" from ")?;
+    let (ip, _) = rest.split_once(" port ")?;
+    if user.is_empty() || ip.is_empty() {
+        return None;
+    }
+    Some(ParsedFailure { user, ip })
+}
+
 /// Background task: tail the configured sshd auth log and update
 /// `ssh_key.last_used_at` (+ write `ssh.key.use` to `ssh_session_audit`)
 /// whenever a successful publickey auth matches a stored fingerprint.
@@ -711,6 +741,8 @@ fn run_auth_log_watcher(state: AppState, path: std::path::PathBuf, handle: tokio
                                 Some(parsed.ip.to_owned()),
                                 Some(user_agent),
                             );
+                        } else if let Some(fail) = parse_auth_failure(line.trim_end()) {
+                            record_auth_failure(&state, fail.ip.to_owned(), fail.user.to_owned());
                         }
                     }
                     Err(e) => {
@@ -786,6 +818,32 @@ fn record_key_use(state: &AppState, fingerprint: String, ip: Option<String>, use
             Err(e) => {
                 tracing::warn!(error = %e, "failed to update ssh_key.last_used_at");
             }
+        }
+    });
+}
+
+/// Upsert one failed-auth attempt into `ssh_auth_failure`, keyed by IP.
+/// Bumps the counter and refreshes `last_user`/`last_seen` for a repeat
+/// offender. Fire-and-forget: a failed insert never blocks the log watcher.
+fn record_auth_failure(state: &AppState, ip: String, user: String) {
+    let state = state.clone();
+    tokio::spawn(async move {
+        let result = state
+            .db
+            .call(move |conn| {
+                conn.execute(
+                    "INSERT INTO ssh_auth_failure(ip, attempts, last_user)
+                     VALUES (?, 1, ?)
+                     ON CONFLICT(ip) DO UPDATE SET
+                         attempts  = attempts + 1,
+                         last_user = excluded.last_user,
+                         last_seen = CURRENT_TIMESTAMP",
+                    rusqlite::params![ip, user],
+                )
+            })
+            .await;
+        if let Err(e) = result {
+            tracing::warn!(error = %e, "failed to record ssh_auth_failure");
         }
     });
 }
@@ -890,5 +948,47 @@ mod tests {
         // sshd with LogLevel below VERBOSE — no fp in line.
         let line = "sshd[1234]: Accepted publickey for parzival from 1.2.3.4 port 22 ssh2";
         assert_eq!(parse_publickey_accept(line), None);
+    }
+
+    #[test]
+    fn parse_auth_failure_password() {
+        let line = "May 27 10:12:34 host sshd[1234]: Failed password for root from 1.2.3.4 port 51234 ssh2";
+        assert_eq!(
+            parse_auth_failure(line),
+            Some(ParsedFailure {
+                user: "root",
+                ip: "1.2.3.4",
+            }),
+        );
+    }
+
+    #[test]
+    fn parse_auth_failure_invalid_user_is_normalised() {
+        let line = "sshd[1234]: Failed password for invalid user admin from 203.0.113.7 port 40000 ssh2";
+        assert_eq!(
+            parse_auth_failure(line),
+            Some(ParsedFailure {
+                user: "admin",
+                ip: "203.0.113.7",
+            }),
+        );
+    }
+
+    #[test]
+    fn parse_auth_failure_publickey_with_trailing_fingerprint() {
+        let line = "sshd[1234]: Failed publickey for root from ::1 port 22 ssh2: ED25519 SHA256:xyz";
+        assert_eq!(
+            parse_auth_failure(line),
+            Some(ParsedFailure {
+                user: "root",
+                ip: "::1",
+            }),
+        );
+    }
+
+    #[test]
+    fn parse_auth_failure_ignores_accepted() {
+        let line = "sshd[1234]: Accepted publickey for root from 1.2.3.4 port 22 ssh2: RSA SHA256:ZZZ";
+        assert_eq!(parse_auth_failure(line), None);
     }
 }
