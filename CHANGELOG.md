@@ -10,10 +10,22 @@ fixes and polish.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-21
+
 ### Added
 
+- **Systemd services you nominate can be watched and controlled.** A new Units page lists the services named in `systemd_units`, each with its live active/failed state, and — for those in the list and no others — start, stop, and restart. Nothing outside the configured set is reachable, so the page can never touch a unit you did not put in front of it.
+- **Disk usage, per filesystem and per directory.** A new Disk page shows every mounted filesystem with how full it is, and — for each path you list in `disk_paths` — the size of that directory tree. `df` needs no allowlist because it reveals no contents; `du` walks a tree, so it only ever measures the directories named in config, never a path a request carries.
+- **Certificate-expiry alerts fire once per milestone, not every check.** As a monitored certificate approaches expiry, Vantage now sends one alert as it crosses each threshold rather than repeating the same warning on every probe, so a certificate quietly running out no longer buries your sinks in duplicates.
+- **See who is hammering SSH, and block them in one click.** The Security page gains an SSH login-attempts section: the source addresses with the most failed logins in the window, geo-located like the rejected-request list, each with a Block button that adds a firewall lockout — the same path the firewall page uses, so the row and the kernel rule are written together.
 - **Check for updates without waiting for the schedule.** Update checks used to run only on their background interval, so a fresh release could sit unnoticed until the next poll. The settings page's Version card now has a "Check for updates" button that runs the check on demand and re-renders with the result, and each service on the Docker page gains a "Check for updates" entry in its menu that re-queries just that image's registry and refreshes its badge. Both are read-only registry polls, so they need admin but not a password re-prompt.
 - **Your account has a name and a picture you can change.** The account page grows a Profile section: upload a PNG, JPEG or WebP as your profile picture (it replaces the initial in the sidebar, and you can remove it again), and rename the account. The name is what you sign in with, so changing it asks for your password first the way a password or two-factor change does — but it does not sign you out anywhere, and entries already in the audit log keep the name they were written with.
+
+### Fixed
+
+- **The audit log shows the real client address behind a reverse proxy.** Every entry read `127.0.0.1` when Vantage ran behind a reverse proxy on the same host, because it recorded the direct connection — which is the proxy, on loopback. It now reads the forwarded client address (`CF-Connecting-IP`, `X-Real-IP` or `X-Forwarded-For`) when, and only when, the connection came from loopback, so a remote client can never spoof the address it is logged under. The public allowlist still gates on the raw connection.
+- **"Select all" in the database console arms the delete button.** Clicking the grid's corner selected every row visually but left the delete button disabled, so you had to click into a row first for the button to react. The corner now updates the toolbar the same way selecting a row does.
+- **No blank band under the page when zooming out on a phone.** Pinch-zooming out exposed a strip below the fixed app frame painted in the browser's default colour instead of the app's background. The background now covers the whole page.
 
 ## [0.5.2] - 2026-07-20
 
@@ -217,7 +229,8 @@ fixes and polish.
 - Repeated failed logins from the same address are throttled independently of any firewall configuration, and login timing does not reveal whether a username exists.
 - Changes to the host are made through a typed, audited boundary rather than by shelling out.
 
-[Unreleased]: https://github.com/klappstuhlpy/vantage/compare/v0.5.2...HEAD
+[Unreleased]: https://github.com/klappstuhlpy/vantage/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/klappstuhlpy/vantage/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/klappstuhlpy/vantage/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/klappstuhlpy/vantage/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/klappstuhlpy/vantage/compare/v0.4.2...v0.5.0
