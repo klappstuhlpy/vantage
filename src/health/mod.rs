@@ -10,11 +10,11 @@
 //!   * this file — orchestration: `spawn_monitor` schedules per-target probe
 //!     loops; `run_check_now` performs a one-off probe and records the result.
 //!
-//! Changed from the monolith: the down/recovery **Discord webhooks are dropped**
-//! here — they need the alert-sink Seam (`has_any_alert_sink`/`send_alert`),
-//! which arrives with the alerts slice. The incident open/close bookkeeping and
-//! the live `/ws` publishing (this is the hub's **second publisher**, after
-//! metrics) are unchanged.
+//! Down/recovery alerts ride the incident bookkeeping: `run_check_now` calls
+//! `AppState::send_alert` exactly when an incident opens or closes, so the
+//! open-incident dedup is also the alert dedup. The live `/ws` publishing
+//! (this is the hub's **second publisher**, after metrics) is unchanged from
+//! the monolith.
 pub mod routes; // HTTP handlers for this admin feature (see main.rs router)
 
 pub mod checker;
@@ -148,6 +148,7 @@ pub async fn run_check_now(state: &AppState, target_id: i64) -> anyhow::Result<C
         (CheckStatus::Up, Some(inc)) => {
             // Recovered → close the incident.
             storage::close_incident(state, inc.id).await?;
+            state.send_alert(recovery_alert(&target, &outcome));
             broadcast_event(state, target_id, "recovered", &outcome);
         }
         (CheckStatus::Down | CheckStatus::Degraded, Some(inc)) => {
@@ -164,6 +165,7 @@ pub async fn run_check_now(state: &AppState, target_id: i64) -> anyhow::Result<C
                     CheckStatus::Up => "up",
                 };
                 storage::open_incident(state, target_id, status_label, outcome.error.as_deref()).await?;
+                state.send_alert(incident_alert(&target, &outcome));
                 broadcast_event(state, target_id, "down", &outcome);
             }
         }
@@ -196,4 +198,91 @@ fn broadcast_event(state: &AppState, target_id: i64, event: &'static str, outcom
             "error": outcome.error,
         }),
     );
+}
+
+/// Discord-shaped alert for an incident opening. The neutral sinks derive
+/// their text from this via `AlertNotification::from_discord_value`.
+fn incident_alert(target: &HealthTarget, outcome: &CheckOutcome) -> serde_json::Value {
+    json!({
+        "username": "vantage",
+        "embeds": [{
+            "title": format!("\u{1f534} {} is {}", target.name, outcome.status_str()),
+            "description": outcome.error.clone().unwrap_or_else(|| "probe failed".to_owned()),
+            "color": if matches!(outcome.status, CheckStatus::Down) { 0xef4444u32 } else { 0xf59e0bu32 },
+            "fields": [{ "name": "Target", "value": target.target.clone(), "inline": true }],
+        }]
+    })
+}
+
+/// Discord-shaped alert for an incident closing.
+fn recovery_alert(target: &HealthTarget, outcome: &CheckOutcome) -> serde_json::Value {
+    json!({
+        "username": "vantage",
+        "embeds": [{
+            "title": format!("\u{1f7e2} {} recovered", target.name),
+            "description": match outcome.latency_ms {
+                Some(ms) => format!("Probe succeeded in {ms} ms."),
+                None => "Probe succeeded.".to_owned(),
+            },
+            "color": 0x22c55eu32,
+        }]
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn target() -> HealthTarget {
+        HealthTarget {
+            id: 1,
+            name: "blog".into(),
+            kind: "http".into(),
+            target: "https://example.com".into(),
+            config_json: "{}".into(),
+            interval_seconds: 60,
+            timeout_ms: 5000,
+            degraded_ms: 1000,
+            enabled: true,
+            created_at: time::OffsetDateTime::UNIX_EPOCH,
+        }
+    }
+
+    fn outcome(status: CheckStatus, error: Option<&str>) -> CheckOutcome {
+        CheckOutcome {
+            status,
+            latency_ms: Some(42),
+            status_code: None,
+            error: error.map(str::to_owned),
+            ssl_days_left: None,
+        }
+    }
+
+    #[test]
+    fn incident_alert_names_target_and_reason() {
+        let v = incident_alert(&target(), &outcome(CheckStatus::Down, Some("timeout")));
+        let embed = &v["embeds"][0];
+        assert_eq!(embed["title"], "\u{1f534} blog is down");
+        assert_eq!(embed["description"], "timeout");
+        assert_eq!(embed["color"], 0xef4444u32);
+        assert_eq!(embed["fields"][0]["value"], "https://example.com");
+    }
+
+    #[test]
+    fn degraded_incident_alerts_amber_with_fallback_reason() {
+        let v = incident_alert(&target(), &outcome(CheckStatus::Degraded, None));
+        let embed = &v["embeds"][0];
+        assert_eq!(embed["title"], "\u{1f534} blog is degraded");
+        assert_eq!(embed["description"], "probe failed");
+        assert_eq!(embed["color"], 0xf59e0bu32);
+    }
+
+    #[test]
+    fn recovery_alert_is_green_and_reports_latency() {
+        let v = recovery_alert(&target(), &outcome(CheckStatus::Up, None));
+        let embed = &v["embeds"][0];
+        assert_eq!(embed["title"], "\u{1f7e2} blog recovered");
+        assert_eq!(embed["description"], "Probe succeeded in 42 ms.");
+        assert_eq!(embed["color"], 0x22c55eu32);
+    }
 }

@@ -10,6 +10,11 @@ fixes and polish.
 
 ## [Unreleased]
 
+### Added
+
+- **Vantage alerts you when the box runs hot or full.** The alert sinks now fire when CPU, memory or disk stays at or above a configurable threshold (default 90%) for about 90 seconds — one alert per excursion, re-armed only once the metric falls clearly below the line, so a value hovering at the threshold cannot flood your sinks. Set `alerts.cpu_alert_pct`, `alerts.mem_alert_pct` or `alerts.disk_alert_pct` in `config.json` to tune, or `0` to turn one off.
+- **Health probes alert on down and recovery.** When a monitored target opens an incident, your configured sinks get one alert naming the target and the reason (red for down, amber for degraded), and one green alert when it recovers — exactly one of each per incident, because the alerts ride the existing incident bookkeeping.
+
 ## [0.6.3] - 2026-07-21
 
 ### Changed
