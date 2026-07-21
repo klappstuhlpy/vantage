@@ -239,16 +239,6 @@ pub struct Config {
     /// thing serving the button.
     #[serde(default)]
     pub systemd_units: Vec<String>,
-    /// Directories the `/disk` page measures with `du`. Empty by default, which
-    /// leaves the directory-sizes card empty and explaining itself.
-    ///
-    /// Same boundary as [`Self::systemd_units`]: a path only reaches `du` because
-    /// it is *named here*, never because a request carried it. There is no route
-    /// that accepts a path, so nothing to point at `/etc` or `/`. The all-mounts
-    /// table beside it needs no allowlist — `df` takes no path and reveals no
-    /// contents.
-    #[serde(default)]
-    pub disk_paths: Vec<String>,
     /// Public base URL the admin app is served from (absolute asset/redirect URLs).
     /// No trailing slash. In `vpn` mode this is the tunnel address.
     #[serde(default = "default_base_url")]
@@ -732,7 +722,6 @@ impl Config {
             secret_scan_paths: Vec::new(),
             spotlight_scripts: Vec::new(),
             systemd_units: Vec::new(),
-            disk_paths: Vec::new(),
             base_url: default_base_url(),
             domains: Vec::new(),
             production: false,
@@ -782,7 +771,6 @@ impl Config {
             secret_scan_paths: Vec::new(),
             spotlight_scripts: Vec::new(),
             systemd_units: Vec::new(),
-            disk_paths: Vec::new(),
             base_url: "http://localhost".to_string(),
             domains: Vec::new(),
             production: false,

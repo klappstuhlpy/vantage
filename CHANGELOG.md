@@ -10,6 +10,16 @@ fixes and polish.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-07-21
+
+### Changed
+
+- **The Disk page lists everything by default — no paths to configure.** The directory half of the page no longer measures only the trees you named in `disk_paths`; it now breaks down every real filesystem automatically, showing each mount's largest top-level directories as bars. The `du` targets are exactly the mount points `df` reports (each walked with `-x`, staying on that one filesystem), so there is still no route that accepts a path and nothing to point at an arbitrary directory. The filesystems table also gains a type column and per-mount inode usage, and capacity totals now sit at the top of the page.
+
+### Removed
+
+- **`disk_paths` config field.** The Disk page needs no allowlist now that it lists all mounts automatically. Any `disk_paths` still present in `config.json` is ignored — nothing to change.
+
 ## [0.6.0] - 2026-07-21
 
 ### Added

@@ -1,0 +1,57 @@
+/* Disk page — the per-mount directory breakdown.
+ *
+ * The filesystem table and the stat tiles reuse shared components (.table,
+ * .stat, .usage, .progress); only the breakdown bars are page-specific. Cards
+ * flow in a responsive grid so a host with several disks reads side by side.
+ */
+
+#breakdown {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: var(--sp-4);
+}
+
+.du-card .card-header code {
+  font-size: var(--fs-sm);
+}
+
+.du-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+/* path | growing bar | right-aligned size. The bar takes the slack so the sizes
+   line up in a column no matter how long the paths are. */
+.du-row {
+  display: grid;
+  grid-template-columns: minmax(0, auto) 1fr max-content;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.du-path {
+  font-size: var(--fs-sm);
+  color: var(--ink-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 14ch;
+}
+
+.du-bar .progress {
+  height: 8px;
+}
+
+.du-size {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+  text-align: right;
+}
+
+.du-empty {
+  font-size: var(--fs-sm);
+  margin: 0;
+}
