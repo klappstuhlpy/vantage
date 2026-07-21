@@ -25,6 +25,7 @@ pub mod docker;
 mod host;
 pub mod routes;
 mod storage;
+pub mod thresholds;
 
 pub use docker::DockerStat;
 pub use host::Sample;
