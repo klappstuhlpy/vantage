@@ -23,9 +23,14 @@ const escapeHtml = (s) =>
   s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 function inlineMd(s) {
+  // Links first, off the freshly-escaped text, so the href is built before any
+  // other rule can run. The URL class also forbids the structural characters
+  // (`<> "' ` and `*`) outright: escapeHtml already neutralised quotes and
+  // angle brackets, and this stops an inserted <code>/<strong> tag or a stray
+  // quote from ever leaking into the attribute value in the first place.
   return s
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)<>"'`*]+)\)/g, (_, t, u) => `<a href="${u}" target="_blank" rel="noopener">${t}</a>`)
     .replace(/`([^`]+)`/g, (_, c) => `<code>${c}</code>`)
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, t, u) => `<a href="${u}" target="_blank" rel="noopener">${t}</a>`)
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     .replace(/\*([^*]+)\*/g, '<em>$1</em>');
 }
