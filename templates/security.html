@@ -135,6 +135,32 @@
     </div>
 </section>
 
+<section>
+    <div class="section-head">
+        <h2>SSH login attempts</h2>
+        <span class="count-badge" id="ssh-count">0</span>
+    </div>
+    <div class="card">
+        <div class="card-body flush">
+            <div class="table-wrap">
+                <table class="table" id="ssh-offenders">
+                    <thead>
+                        <tr>
+                            <th>Address</th>
+                            {% if geoip_enabled %}<th>Location</th>{% endif %}
+                            <th>Last user</th>
+                            <th class="num">Attempts</th>
+                            <th>Last seen</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="ssh-offenders-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</section>
+
 {% if cloudflare_enabled %}
 <section id="cf">
     <div class="section-head">

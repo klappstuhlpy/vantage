@@ -15,8 +15,8 @@
  *     note rather than as a precise number we cannot stand behind.
  */
 
-import { get, withQuery, ApiError } from '../core/api.js';
-import { h, icon, render, pill, emptyRow, emptyState, skeletonRows, reportError, wireSegmented } from '../core/ui.js';
+import { get, withQuery, postUrlEncoded, ApiError } from '../core/api.js';
+import { h, icon, render, pill, emptyRow, emptyState, skeletonRows, reportError, wireSegmented, confirm, toastOk, toastErr } from '../core/ui.js';
 import { num, bytes, absolute, relative, startTimestampTicker } from '../core/format.js';
 import { createChart, destroyChart } from '../core/chart.js';
 
@@ -44,6 +44,8 @@ const ipCountEl = document.getElementById('ip-count');
 const reasonsEl = document.getElementById('reasons');
 const countriesEl = document.getElementById('countries');
 const recentBody = document.getElementById('recent-body');
+const sshOffendersBody = document.getElementById('ssh-offenders-body');
+const sshCountEl = document.getElementById('ssh-count');
 
 let range = '24h';
 let timelineChart = null;
@@ -241,6 +243,69 @@ function renderRecent(rows) {
 }
 
 /* =======================================================================
+   SSH login attempts
+   ======================================================================= */
+
+/**
+ * Block one source IP by handing it to the firewall's lockout endpoint — the
+ * same path the manual block on /firewall uses, so there is one code path that
+ * both records the row and pushes the kernel rule. Indefinite (no duration).
+ */
+async function blockIp(ip, attempts, btn) {
+  const ok = await confirm({
+    title: 'Block this address?',
+    message: `Add a firewall lockout for ${ip}. It will be dropped at the packet filter until you release it.`,
+    confirmLabel: 'Block',
+    danger: true,
+  });
+  if (!ok) return;
+
+  btn.disabled = true;
+  try {
+    const res = await postUrlEncoded('/firewall/lockout', {
+      ip,
+      reason: `SSH brute-force (${attempts} attempts)`,
+    });
+    // A row without a kernel rule behind it is worse than none — say which happened.
+    if (res && res.blocked === false) {
+      toastOk('Address recorded', `${ip} is on the lockout list, but no firewall backend applied a kernel rule.`);
+    } else {
+      toastOk('Address blocked', `${ip} was added to the firewall lockout list.`);
+    }
+    btn.replaceWith(h('span', { class: 'dim' }, 'Blocked'));
+  } catch (e) {
+    btn.disabled = false;
+    toastErr("Couldn't block", e?.message || 'The firewall rejected that request.');
+  }
+}
+
+function renderSshOffenders(rows) {
+  sshCountEl.textContent = num(rows.length);
+  const cols = GEOIP ? 6 : 5;
+  if (!rows.length) {
+    render(sshOffendersBody, emptyRow(cols, 'No failed SSH logins recorded in this range.'));
+    return;
+  }
+
+  render(
+    sshOffendersBody,
+    ...rows.map((r) => {
+      const btn = h('button', { class: 'btn sm danger', onclick: () => blockIp(r.ip, r.attempts, btn) }, 'Block');
+      return h(
+        'tr',
+        {},
+        h('td', { class: 'mono' }, GEOIP ? [flag(r.country_code), r.ip] : r.ip),
+        GEOIP ? h('td', {}, place(r.country_code, r.country, r.city)) : null,
+        h('td', { class: 'mono' }, r.last_user || h('span', { class: 'dim' }, '—')),
+        h('td', { class: 'num mono' }, num(r.attempts)),
+        h('td', {}, h('time', { class: 'js-ts', datetime: new Date(r.last_seen * 1000).toISOString(), title: absolute(r.last_seen) }, relative(r.last_seen))),
+        h('td', { class: 'num' }, btn)
+      );
+    })
+  );
+}
+
+/* =======================================================================
    Cloudflare
    ======================================================================= */
 
@@ -340,6 +405,7 @@ function showLoading() {
   render(tilesEl, ...Array.from({ length: 4 }, () => h('div', { class: 'stat' }, h('div', { class: 'skel skel-text' }))));
   render(topIpsBody, ...skeletonRows(GEOIP ? 3 : 2));
   render(recentBody, ...skeletonRows(5));
+  render(sshOffendersBody, ...skeletonRows(GEOIP ? 6 : 5));
 }
 
 async function load() {
@@ -367,12 +433,14 @@ async function load() {
       );
     }
     renderRecent(d.recent);
+    renderSshOffenders(d.ssh_offenders || []);
   } catch (e) {
     if (mySeq !== seq) return;
     reportError(e, "Couldn't load security data");
     render(tilesEl, emptyState({ degraded: true, title: "Couldn't load security data", sub: e?.message }));
     render(topIpsBody, emptyRow(GEOIP ? 3 : 2, 'Unavailable.'));
     render(recentBody, emptyRow(5, 'Unavailable.'));
+    render(sshOffendersBody, emptyRow(GEOIP ? 6 : 5, 'Unavailable.'));
   }
 
   if (CLOUDFLARE) loadCloudflare(mySeq);

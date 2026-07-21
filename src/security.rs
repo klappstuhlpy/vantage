@@ -80,6 +80,9 @@ struct SecurityData {
     country_distribution: Vec<CountryCount>,
     /// Most recent suspicious events for the activity feed.
     recent: Vec<RecentEvent>,
+    /// SSH brute-force sources in the window (from the sshd auth-log watcher),
+    /// enriched with geo info. Empty when no auth log is configured.
+    ssh_offenders: Vec<SshOffender>,
     /// Headline totals for the tile row.
     totals: Totals,
 }
@@ -104,6 +107,18 @@ struct TimelineBucket {
 struct TopIp {
     ip: String,
     count: u64,
+    country_code: String,
+    country: String,
+    city: String,
+}
+
+#[derive(Serialize)]
+struct SshOffender {
+    ip: String,
+    attempts: u64,
+    last_user: String,
+    /// Unix seconds of the most recent attempt.
+    last_seen: i64,
     country_code: String,
     country: String,
     city: String,
@@ -166,7 +181,13 @@ async fn security_data(
         return Err(StatusCode::FORBIDDEN);
     }
 
-    // If requests.db is not configured, return empty data.
+    let seconds = range_to_seconds(&query.range);
+    // SSH offenders live in Vantage's own DB, independent of requests.db — so
+    // they populate even when web request logging is off.
+    let ssh_offenders = query_ssh_offenders(&state, seconds).await;
+
+    // If requests.db is not configured, the request-derived panels are empty
+    // but the SSH offenders section still has data.
     let Some(requests_db) = state.requests.as_ref() else {
         tracing::warn!("security_data called but requests.db is not configured");
         return Ok(Json(SecurityData {
@@ -175,6 +196,7 @@ async fn security_data(
             reason_breakdown: Vec::new(),
             country_distribution: Vec::new(),
             recent: Vec::new(),
+            ssh_offenders,
             totals: Totals {
                 failed_logins: 0,
                 rate_limited: 0,
@@ -184,7 +206,6 @@ async fn security_data(
         }));
     };
 
-    let seconds = range_to_seconds(&query.range);
     let since_ms = (OffsetDateTime::now_utc().unix_timestamp() - seconds) * 1_000;
 
     // All 4xx entries (used by every chart on the page) — cap to 5k to stay
@@ -353,8 +374,56 @@ async fn security_data(
         reason_breakdown,
         country_distribution,
         recent,
+        ssh_offenders,
         totals,
     }))
+}
+
+/// The SSH brute-force sources active within the window, ranked by attempt
+/// count and geo-enriched. Reads Vantage's own admin DB (the sshd auth-log
+/// watcher writes `ssh_auth_failure` there), so it populates even when
+/// requests.db is absent. Never errors out the page — a DB hiccup yields an
+/// empty list, logged.
+async fn query_ssh_offenders(state: &AppState, seconds: i64) -> Vec<SshOffender> {
+    // (ip, attempts, last_user, last_seen unix secs)
+    type OffenderRow = (String, u64, Option<String>, i64);
+    let cutoff = format!("-{seconds} seconds");
+    let rows: Vec<OffenderRow> = state
+        .db
+        .call(move |conn| -> rusqlite::Result<Vec<OffenderRow>> {
+            let mut stmt = conn.prepare_cached(
+                "SELECT ip, attempts, last_user,
+                        CAST(strftime('%s', last_seen) AS INTEGER) AS last_seen
+                 FROM ssh_auth_failure
+                 WHERE last_seen >= datetime('now', ?)
+                 ORDER BY attempts DESC LIMIT 25",
+            )?;
+            let rows = stmt
+                .query_map([cutoff], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "failed to query ssh_auth_failure");
+            Vec::new()
+        });
+
+    let geo = &state.geoip;
+    rows.into_iter()
+        .map(|(ip, attempts, last_user, last_seen)| {
+            let g = geo.lookup_str(&ip).unwrap_or_default();
+            SshOffender {
+                ip,
+                attempts,
+                last_user: last_user.unwrap_or_default(),
+                last_seen,
+                country_code: g.country_code,
+                country: g.country,
+                city: g.city,
+            }
+        })
+        .collect()
 }
 
 /// Pick a sensible bucket size so timeline charts have ~40-120 buckets.
